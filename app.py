@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from fatloss.config import save_env_values
 from fatloss.deepseek import DeepSeekClient
@@ -18,6 +19,8 @@ from fatloss.storage import AssistantStore
 
 
 st.set_page_config(page_title="减脂计划小助手", page_icon="L", layout="wide", initial_sidebar_state="expanded")
+
+PAGES = ["今日计划", "打卡记录", "菜单库", "设置"]
 
 
 @st.cache_resource
@@ -31,7 +34,8 @@ def apply_style() -> None:
         <style>
         :root {--ink:#172033;--muted:#667085;--line:#d8e0ea;--blue:#1b69d2;--green:#1f8a58;--red:#c2410c;--bg:#f5f7fb;}
         .stApp {background:var(--bg);font-family:Inter,"PingFang SC",system-ui,sans-serif;color:var(--ink);}
-        header[data-testid="stHeader"],[data-testid="stToolbar"],.stDeployButton,[data-testid="stDecoration"]{display:none!important;}
+        header[data-testid="stHeader"]{background:rgba(245,247,251,.96)!important;box-shadow:none!important;}
+        [data-testid="stToolbar"],.stDeployButton,[data-testid="stDecoration"]{display:none!important;}
         .main .block-container{max-width:1260px;padding:20px 28px 48px;}
         [data-testid="stSidebar"]{background:#132238;border-right:1px solid rgba(255,255,255,.1);}
         [data-testid="stSidebar"] *{color:#edf4ff!important;}
@@ -58,8 +62,12 @@ def apply_style() -> None:
         .source-block{background:#111827;color:#f9fafb;border-radius:8px;padding:13px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;}
         .stButton button,.stDownloadButton button{border-radius:7px;background:#1b69d2;color:white;border:0;font-weight:800;}
         .stButton button:hover,.stDownloadButton button:hover{background:#1557b0;color:white;border:0;}
+        div[role="radiogroup"]{gap:8px;flex-wrap:wrap;}
+        div[role="radiogroup"] label{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:0 0 8px 0;}
+        div[role="radiogroup"] label:has(input:checked){background:#1b69d2;border-color:#1b69d2;}
+        div[role="radiogroup"] label:has(input:checked) p{color:#fff!important;font-weight:850!important;}
         [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:8px;overflow:hidden;}
-        @media(max-width:760px){.main .block-container{padding:14px 14px 36px}.app-head{display:block}.metric-grid{grid-template-columns:1fr}.title{font-size:26px}.status-pill{margin-top:10px}}
+        @media(max-width:760px){.main .block-container{padding:48px 14px 36px}.app-head{display:block}.metric-grid{grid-template-columns:1fr}.title{font-size:26px}.status-pill{margin-top:10px}}
         </style>
         """,
         unsafe_allow_html=True,
@@ -123,6 +131,197 @@ def current_plan(store_: AssistantStore) -> tuple[Any, dict[str, Any]]:
     if "today_draft" not in st.session_state or "today_view" not in st.session_state:
         return generate_plan(store_, use_ai=False)
     return st.session_state["today_draft"], st.session_state["today_view"]
+
+
+def plan_snapshot_payload(draft, view: dict[str, Any]) -> dict[str, Any]:
+    lunch = []
+    for item in view.get("lunch_options", [])[:3]:
+        if isinstance(item, dict):
+            lunch.append(
+                {
+                    "title": str(item.get("title", "午饭选择")),
+                    "meta": f"约 {item.get('estimate_kcal', '')} kcal · 蛋白 {item.get('protein_g', '')} g",
+                    "tips": [str(tip) for tip in item.get("order_tips", [])[:2]],
+                }
+            )
+    dinner = view.get("dinner_recipe", {})
+    if not isinstance(dinner, dict):
+        dinner = {}
+    return {
+        "day": draft.day,
+        "calories": f"{draft.calorie_range[0]}-{draft.calorie_range[1]} kcal",
+        "protein": f"{draft.protein_g} g",
+        "coach_note": str(view.get("coach_note", "")),
+        "workout_note": str(view.get("workout_note", "")),
+        "workout": [
+            f"{item.name} {item.minutes} 分钟 · 坡度 {item.incline_pct:.1f}% · 速度 {item.speed_kmh:.1f} km/h"
+            for item in draft.workout
+        ],
+        "lunch": lunch,
+        "dinner": {
+            "title": str(dinner.get("title", "家常晚饭")),
+            "meta": f"约 {dinner.get('estimate_kcal', '')} kcal · 蛋白 {dinner.get('protein_g', '')} g · {dinner.get('cook_minutes', '')} 分钟",
+            "ingredients": [str(item) for item in dinner.get("ingredients", [])[:8]],
+            "steps": [str(item) for item in dinner.get("steps", [])[:5]],
+        },
+        "adjustments": [str(item) for item in view.get("adjustments", [])[:4]],
+        "risk_notes": [str(item) for item in draft.risk_notes[:3]],
+    }
+
+
+def render_plan_image_button(draft, view: dict[str, Any]) -> None:
+    payload = json.dumps(plan_snapshot_payload(draft, view), ensure_ascii=False).replace("</", "<\\/")
+    components.html(
+        f"""
+        <div class="snapshot-tool">
+          <button id="save-plan-image" type="button">保存今日计划图片</button>
+          <span id="save-plan-status">手机上会打开分享/保存窗口</span>
+        </div>
+        <script>
+        const planData = {payload};
+        const button = document.getElementById("save-plan-image");
+        const status = document.getElementById("save-plan-status");
+        function drawRoundedRect(ctx, x, y, w, h, r, fill) {{
+          ctx.beginPath();
+          ctx.moveTo(x + r, y);
+          ctx.arcTo(x + w, y, x + w, y + h, r);
+          ctx.arcTo(x + w, y + h, x, y + h, r);
+          ctx.arcTo(x, y + h, x, y, r);
+          ctx.arcTo(x, y, x + w, y, r);
+          ctx.closePath();
+          ctx.fillStyle = fill;
+          ctx.fill();
+        }}
+        function wrapText(ctx, text, x, y, maxWidth, lineHeight) {{
+          const chars = String(text || "").split("");
+          let line = "";
+          for (const ch of chars) {{
+            const test = line + ch;
+            if (ctx.measureText(test).width > maxWidth && line) {{
+              ctx.fillText(line, x, y);
+              y += lineHeight;
+              line = ch;
+            }} else {{
+              line = test;
+            }}
+          }}
+          if (line) {{
+            ctx.fillText(line, x, y);
+            y += lineHeight;
+          }}
+          return y;
+        }}
+        function section(ctx, title, lines, y) {{
+          ctx.fillStyle = "#172033";
+          ctx.font = "700 34px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+          ctx.fillText(title, 64, y);
+          y += 42;
+          ctx.font = "400 27px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+          ctx.fillStyle = "#344054";
+          for (const line of lines.filter(Boolean)) {{
+            y = wrapText(ctx, line, 64, y, 952, 39);
+            y += 8;
+          }}
+          return y + 28;
+        }}
+        function makeCanvas() {{
+          const width = 1080;
+          const temp = document.createElement("canvas");
+          temp.width = width;
+          temp.height = 2600;
+          const ctx = temp.getContext("2d");
+          ctx.fillStyle = "#f5f7fb";
+          ctx.fillRect(0, 0, temp.width, temp.height);
+          drawRoundedRect(ctx, 32, 32, 1016, 220, 28, "#132238");
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "800 54px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+          ctx.fillText("今日减脂计划", 64, 104);
+          ctx.font = "400 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+          ctx.fillStyle = "#d7e5ff";
+          ctx.fillText(planData.day, 64, 150);
+          ctx.font = "700 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText("热量 " + planData.calories, 64, 206);
+          ctx.fillText("蛋白 " + planData.protein, 560, 206);
+          let y = 310;
+          y = section(ctx, "今日提醒", [planData.coach_note], y);
+          y = section(ctx, "跑步机爬坡", [planData.workout_note, ...planData.workout], y);
+          const lunchLines = [];
+          for (const item of planData.lunch) {{
+            lunchLines.push("• " + item.title + "｜" + item.meta);
+            for (const tip of item.tips || []) lunchLines.push("  " + tip);
+          }}
+          y = section(ctx, "午饭外食", lunchLines, y);
+          const dinnerLines = [
+            "• " + planData.dinner.title + "｜" + planData.dinner.meta,
+            "食材：" + (planData.dinner.ingredients || []).join("、"),
+            ...(planData.dinner.steps || []).map((step, idx) => (idx + 1) + ". " + step)
+          ];
+          y = section(ctx, "晚饭自煮", dinnerLines, y);
+          y = section(ctx, "今日调整", planData.adjustments.map(item => "• " + item), y);
+          y = section(ctx, "安全边界", planData.risk_notes.map(item => "• " + item), y);
+          ctx.fillStyle = "#667085";
+          ctx.font = "400 23px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+          ctx.fillText("减脂计划小助手 · 普通成年人习惯计划，不替代医疗建议", 64, y + 12);
+          const finalCanvas = document.createElement("canvas");
+          finalCanvas.width = width;
+          finalCanvas.height = Math.min(2600, y + 72);
+          finalCanvas.getContext("2d").drawImage(temp, 0, 0);
+          return finalCanvas;
+        }}
+        async function savePlanImage() {{
+          status.textContent = "正在生成图片...";
+          const canvas = makeCanvas();
+          canvas.toBlob(async blob => {{
+            const fileName = `fatloss-plan-${{planData.day}}.png`;
+            const file = new File([blob], fileName, {{ type: "image/png" }});
+            try {{
+              if (navigator.canShare && navigator.canShare({{ files: [file] }})) {{
+                await navigator.share({{ files: [file], title: "今日减脂计划" }});
+                status.textContent = "已打开手机分享窗口";
+                return;
+              }}
+            }} catch (error) {{}}
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = fileName;
+            link.click();
+            status.textContent = "图片已生成，可在下载中查看";
+            setTimeout(() => URL.revokeObjectURL(url), 30000);
+          }}, "image/png", 0.96);
+        }}
+        button.addEventListener("click", savePlanImage);
+        </script>
+        <style>
+        .snapshot-tool {{
+          display:flex;
+          gap:10px;
+          align-items:center;
+          flex-wrap:wrap;
+          font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;
+          margin:0;
+        }}
+        #save-plan-image {{
+          appearance:none;
+          border:0;
+          border-radius:8px;
+          background:#1b69d2;
+          color:white;
+          padding:12px 16px;
+          font-size:15px;
+          font-weight:800;
+          cursor:pointer;
+        }}
+        #save-plan-status {{ color:#667085; font-size:13px; }}
+        @media(max-width:520px) {{
+          #save-plan-image {{ width:100%; }}
+          #save-plan-status {{ display:block; width:100%; text-align:center; }}
+        }}
+        </style>
+        """,
+        height=78,
+    )
 
 
 def render_today(store_: AssistantStore, client: DeepSeekClient) -> None:
@@ -212,6 +411,7 @@ def render_today(store_: AssistantStore, client: DeepSeekClient) -> None:
         mime="text/markdown",
         use_container_width=True,
     )
+    render_plan_image_button(draft, view)
 
 
 def render_checkin(store_: AssistantStore) -> None:
@@ -381,7 +581,8 @@ def main() -> None:
     profile = store_.get_profile()
     top_header(profile, client)
     st.sidebar.markdown("<div style='font-size:22px;font-weight:900;margin:4px 2px 20px;'>减脂助手</div>", unsafe_allow_html=True)
-    page = st.sidebar.radio("导航", ["今日计划", "打卡记录", "菜单库", "设置"], label_visibility="collapsed")
+    st.sidebar.caption("手机端也可以直接使用页面顶部导航。")
+    page = st.radio("导航", PAGES, horizontal=True, label_visibility="collapsed", key="main_page")
     if page == "今日计划":
         render_today(store_, client)
     elif page == "打卡记录":
@@ -394,4 +595,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
