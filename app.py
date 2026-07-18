@@ -3,7 +3,6 @@ from __future__ import annotations
 import html
 import json
 from datetime import date
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -18,9 +17,9 @@ from fatloss.planner import PlanEngine, build_plan_view
 from fatloss.storage import AssistantStore
 
 
-st.set_page_config(page_title="减脂计划小助手", page_icon="L", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="减肥助手", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
 
-PAGES = ["今日计划", "打卡记录", "菜单库", "设置"]
+PAGES = ["今日", "记录", "菜单", "我的"]
 DAILY_CONTEXT_STATE_KEY = "daily_context_payload"
 
 
@@ -33,42 +32,88 @@ def apply_style() -> None:
     st.markdown(
         """
         <style>
-        :root {--ink:#172033;--muted:#667085;--line:#d8e0ea;--blue:#1b69d2;--green:#1f8a58;--red:#c2410c;--bg:#f5f7fb;}
-        .stApp {background:var(--bg);font-family:Inter,"PingFang SC",system-ui,sans-serif;color:var(--ink);}
-        header[data-testid="stHeader"]{background:rgba(245,247,251,.96)!important;box-shadow:none!important;}
-        [data-testid="stToolbar"],.stDeployButton,[data-testid="stDecoration"]{display:none!important;}
-        .main .block-container{max-width:1260px;padding:20px 28px 48px;}
-        [data-testid="stSidebar"]{background:#132238;border-right:1px solid rgba(255,255,255,.1);}
-        [data-testid="stSidebar"] *{color:#edf4ff!important;}
-        [data-testid="stSidebar"] label{border-radius:8px;padding:10px 12px;margin:3px 0;}
-        [data-testid="stSidebar"] label:has(input:checked){background:#1b69d2!important;}
-        .app-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px;}
-        .title{font-size:31px;font-weight:900;color:#111827;line-height:1.1;margin:0;}
-        .subtitle{color:var(--muted);font-size:14px;margin-top:7px;}
-        .status-pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:8px 12px;background:white;color:#344054;font-weight:700;font-size:12px;}
-        .metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:10px 0 14px;}
-        .metric-card{background:white;border:1px solid var(--line);border-radius:8px;padding:15px 16px;min-height:92px;}
-        .metric-label{color:var(--muted);font-size:12px;font-weight:750;margin-bottom:8px;}
-        .metric-value{font-size:25px;font-weight:900;color:#111827;line-height:1.1;}
-        .metric-help{color:var(--muted);font-size:12px;margin-top:7px;}
-        .plain-card{background:white;border:1px solid var(--line);border-radius:8px;padding:16px 17px;margin:10px 0;}
-        .card-title{font-size:18px;font-weight:900;color:#111827;margin-bottom:8px;}
+        :root {--ink:#14191f;--muted:#71777f;--line:#e8ebee;--coral:#ff5c4d;--coral-dark:#e94a3d;--mint:#35c99a;--cyan:#35aee8;--yellow:#f5bd48;--bg:#f7f8f9;}
+        html,body,[class*="css"]{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:0;}
+        .stApp{background:var(--bg);color:var(--ink);}
+        header[data-testid="stHeader"]{height:0;min-height:0;background:transparent!important;}
+        [data-testid="stToolbar"],.stDeployButton,[data-testid="stDecoration"],#MainMenu,footer,[data-testid="stSidebar"],[data-testid="collapsedControl"]{display:none!important;}
+        .stMainBlockContainer,.main .block-container{max-width:980px;padding:30px 24px 110px;}
+        .app-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin:0 0 16px;}
+        .app-title{font-size:38px;font-weight:900;color:#0c1116;line-height:1.05;margin:0;}
+        .app-date{color:var(--muted);font-size:15px;margin-top:9px;}
+        .assistant-state{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:#454b52;font-size:12px;font-weight:750;white-space:nowrap;}
+        .assistant-state:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--mint);}
+        .wellness-scene{height:210px;position:relative;overflow:hidden;border-radius:8px;background:#e9f8fb;margin:8px 0 0;}
+        .scene-sun{position:absolute;width:92px;height:92px;border-radius:50%;background:#ffab9d;left:45%;top:30px;}
+        .scene-hill{position:absolute;border-radius:50% 50% 0 0;bottom:-62px;}
+        .scene-hill.a{width:68%;height:190px;left:-16%;background:#9ee2e4;transform:rotate(8deg);}
+        .scene-hill.b{width:72%;height:180px;right:-22%;background:#b9eadb;transform:rotate(-8deg);}
+        .scene-hill.c{width:70%;height:105px;left:20%;bottom:-50px;background:#ffe29b;transform:rotate(4deg);}
+        .scene-path{position:absolute;width:54px;height:260px;left:49%;top:90px;background:#fff;transform:rotate(60deg);border-radius:50%;}
+        .metric-shell{position:relative;z-index:2;background:#fff;border:1px solid var(--line);border-radius:8px;margin:-52px 28px 22px;padding:21px 12px;box-shadow:0 8px 24px rgba(26,42,53,.08);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));}
+        .metric-item{min-width:0;text-align:center;padding:0 12px;border-left:1px solid var(--line);}
+        .metric-item:first-child{border-left:0;}
+        .metric-icon{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:17px;font-weight:900;margin:0 auto 7px;}
+        .metric-icon.mint{background:var(--mint)}.metric-icon.coral{background:var(--coral)}.metric-icon.cyan{background:var(--cyan)}
+        .metric-label{color:#454b52;font-size:13px;font-weight:750;}
+        .metric-value{font-size:30px;font-weight:900;line-height:1.15;margin-top:5px;white-space:nowrap;}
+        .metric-value.mint{color:var(--mint)}.metric-value.coral{color:var(--coral)}.metric-value.cyan{color:var(--cyan)}
+        .metric-unit{font-size:13px;color:#343a40;font-weight:750;margin-left:3px;}
+        .daily-prompt{margin:2px 0 4px;}
+        .daily-prompt-title{font-size:20px;font-weight:900;color:#12171d;}
+        .daily-prompt-copy{font-size:13px;color:var(--muted);margin-top:4px;}
+        [data-testid="stForm"]{background:#fff;border:1px solid var(--line);border-radius:8px;padding:17px 18px 10px;box-shadow:none;}
+        [data-testid="stSlider"]{padding-top:2px;}
+        .section-title{font-size:25px;font-weight:900;color:#10151b;margin:26px 0 12px;}
+        .workout-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin:0 0 10px;}
+        .workout-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;}
+        .workout-name{font-size:20px;font-weight:900;color:#11161c;}
+        .workout-meta{font-size:13px;color:var(--muted);margin-top:5px;line-height:1.55;}
+        .duration-badge{background:#fff1ef;color:var(--coral-dark);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:850;white-space:nowrap;}
+        .phase-row{display:flex;align-items:center;gap:8px;margin-top:16px;overflow-x:auto;padding-bottom:2px;}
+        .phase-chip{background:#eef8f6;border-radius:8px;padding:8px 10px;font-size:13px;color:#263c38;white-space:nowrap;}
+        .phase-line{height:1px;background:#72d5c0;min-width:20px;flex:1;}
+        .meal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px;}
+        .meal-card{position:relative;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:8px;padding:18px;min-height:160px;}
+        .meal-kicker{font-size:13px;color:var(--muted);font-weight:750;}
+        .meal-name{font-size:20px;font-weight:900;color:#11161c;margin:9px 74px 5px 0;line-height:1.35;}
+        .meal-detail{font-size:14px;color:#50565d;line-height:1.6;margin-right:70px;}
+        .meal-art{position:absolute;right:17px;bottom:18px;width:62px;height:62px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;}
+        .meal-art.lunch{background:#fff2cf;color:#bd7818}.meal-art.dinner{background:#ffe6e1;color:#d74e40}
+        .assistant-note{display:flex;gap:12px;align-items:flex-start;background:#edf8fb;border:1px solid #d8eef4;border-radius:8px;padding:15px 16px;margin:14px 0 12px;color:#34454b;font-size:14px;line-height:1.6;}
+        .assistant-mark{width:30px;height:30px;flex:0 0 30px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--mint);color:#fff;font-weight:900;}
         .small{font-size:12px;color:var(--muted);}
-        .note{border-left:4px solid var(--blue);background:#eef5ff;padding:12px 14px;border-radius:6px;color:#26364f;margin:10px 0;}
-        .risk{border-left:4px solid var(--red);background:#fff7ed;padding:12px 14px;border-radius:6px;color:#7c2d12;margin:10px 0;}
-        .meal-row{border-top:1px solid #e6ebf2;padding:11px 0;}
-        .meal-row:first-child{border-top:0;}
-        .meal-title{font-weight:850;color:#111827;}
-        .tag{display:inline-block;background:#eef5ff;color:#1552a1;border:1px solid #cfe0ff;border-radius:6px;padding:3px 7px;margin:5px 5px 0 0;font-size:11px;font-weight:700;}
-        .source-block{background:#111827;color:#f9fafb;border-radius:8px;padding:13px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;}
-        .stButton button,.stDownloadButton button{border-radius:7px;background:#1b69d2;color:white;border:0;font-weight:800;}
-        .stButton button:hover,.stDownloadButton button:hover{background:#1557b0;color:white;border:0;}
-        div[role="radiogroup"]{gap:8px;flex-wrap:wrap;}
-        div[role="radiogroup"] label{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:0 0 8px 0;}
-        div[role="radiogroup"] label:has(input:checked){background:#1b69d2;border-color:#1b69d2;}
-        div[role="radiogroup"] label:has(input:checked) p{color:#fff!important;font-weight:850!important;}
+        .risk{border-left:4px solid var(--coral);background:#fff5f3;padding:12px 14px;border-radius:6px;color:#71342e;margin:8px 0;}
+        .tag{display:inline-block;background:#eef8f6;color:#25735f;border-radius:6px;padding:4px 7px;margin:5px 5px 0 0;font-size:11px;font-weight:750;}
+        .source-block{background:#181d22;color:#f9fafb;border-radius:8px;padding:13px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;}
+        .stButton button,.stDownloadButton button,[data-testid="stFormSubmitButton"] button{border-radius:8px;background:var(--coral);color:#fff;border:0;font-weight:850;min-height:42px;}
+        .stButton button:hover,.stDownloadButton button:hover,[data-testid="stFormSubmitButton"] button:hover{background:var(--coral-dark);color:#fff;border:0;}
         [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:8px;overflow:hidden;}
-        @media(max-width:760px){.main .block-container{padding:48px 14px 36px}.app-head{display:block}.metric-grid{grid-template-columns:1fr}.title{font-size:26px}.status-pill{margin-top:10px}}
+        [data-testid="stExpander"]{background:#fff;border:1px solid var(--line);border-radius:8px!important;overflow:hidden;}
+        [data-testid="stRadio"]{margin:0 0 20px;}
+        div[role="radiogroup"]{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px;}
+        div[role="radiogroup"] label{display:flex;justify-content:center;background:transparent;border:0;border-radius:6px;padding:9px 8px;margin:0;}
+        div[role="radiogroup"] label p{color:#7d8288!important;font-size:14px!important;font-weight:750!important;}
+        div[role="radiogroup"] label p:before{display:block;font-size:18px;line-height:18px;margin-bottom:4px;font-weight:850;}
+        div[role="radiogroup"] label:nth-child(1) p:before{content:"⌂";}
+        div[role="radiogroup"] label:nth-child(2) p:before{content:"✓";}
+        div[role="radiogroup"] label:nth-child(3) p:before{content:"☷";}
+        div[role="radiogroup"] label:nth-child(4) p:before{content:"○";}
+        div[role="radiogroup"] label:has(input:checked){background:#fff1ef;}
+        div[role="radiogroup"] label:has(input:checked) p{color:var(--coral)!important;font-weight:900!important;}
+        div[role="radiogroup"] label>div:first-child{display:none!important;}
+        @media(max-width:760px){
+          .stMainBlockContainer,.main .block-container{padding:22px 13px 108px;}
+          .app-title{font-size:32px}.app-date{font-size:13px}.assistant-state{padding:8px;font-size:11px}
+          .wellness-scene{height:176px}.scene-sun{width:76px;height:76px;top:26px}
+          .metric-shell{margin:-42px 10px 18px;padding:16px 4px}.metric-item{padding:0 5px}.metric-value{font-size:24px}.metric-unit{display:block;margin:2px 0 0;font-size:11px}
+          .section-title{font-size:22px;margin-top:22px}.workout-card{padding:16px}.workout-name{font-size:18px}
+          .meal-grid{grid-template-columns:1fr}.meal-card{min-height:138px}.meal-name{font-size:18px}
+          [data-testid="stRadio"]{position:fixed;z-index:9999;left:0;right:0;bottom:0;margin:0;padding:7px 10px calc(7px + env(safe-area-inset-bottom));background:rgba(255,255,255,.98);border-top:1px solid var(--line);box-shadow:0 -5px 18px rgba(30,38,44,.06);}
+          div[role="radiogroup"]{border:0;padding:0;background:transparent;}
+          div[role="radiogroup"] label{padding:10px 3px;}
+          div[role="radiogroup"] label:has(input:checked){background:transparent;}
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -102,33 +147,46 @@ def fatigue_from_effort(label: str) -> int:
 
 
 def top_header(profile: Profile | None, client: DeepSeekClient) -> None:
-    name = profile.name if profile else "未建档"
-    status = "DeepSeek 已配置" if client.configured else "本地规则模式"
+    weekday = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][date.today().weekday()]
+    name = profile.name if profile and profile.name else "你"
+    status = "AI 助手在线" if client.configured else "基础助手在线"
     st.markdown(
         f"""
         <div class="app-head">
           <div>
-            <div class="title">减脂计划小助手</div>
-            <div class="subtitle">{html.escape(name)} · 今日计划、外食午饭、家常晚饭、爬坡打卡</div>
+            <div class="app-title">减肥助手</div>
+            <div class="app-date">{date.today().month}月{date.today().day}日 · {weekday} · {html.escape(name)}，今天我来安排</div>
           </div>
-          <div class="status-pill">{html.escape(status)}</div>
+          <div class="assistant-state">{status}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def metric_cards(draft, recent: list[CheckIn]) -> None:
-    recent_week = recent[:7]
-    done_count = sum(1 for item in recent_week if item.workout_done)
-    done_minutes = [item.workout_minutes for item in recent_week if item.workout_done and item.workout_minutes]
-    minutes_label = f"{sum(done_minutes) / len(done_minutes):.0f} 分/次" if done_minutes else "待记录"
+def metric_cards(draft) -> None:
+    total_minutes = sum(int(item.minutes) for item in draft.workout)
+    main_segment = next((item for item in draft.workout if item.name == "主训练"), draft.workout[0])
     st.markdown(
         f"""
-        <div class="metric-grid">
-          <div class="metric-card"><div class="metric-label">今日热量范围</div><div class="metric-value">{draft.calorie_range[0]}-{draft.calorie_range[1]}</div><div class="metric-help">kcal，稳健缺口</div></div>
-          <div class="metric-card"><div class="metric-label">蛋白目标</div><div class="metric-value">{draft.protein_g} g</div><div class="metric-help">优先分配到午饭和晚饭</div></div>
-          <div class="metric-card"><div class="metric-label">近 7 天爬坡</div><div class="metric-value">{done_count}/7</div><div class="metric-help">平均完成 {minutes_label}</div></div>
+        <div class="wellness-scene" aria-hidden="true">
+          <div class="scene-sun"></div>
+          <div class="scene-hill a"></div><div class="scene-hill b"></div><div class="scene-hill c"></div>
+          <div class="scene-path"></div>
+        </div>
+        <div class="metric-shell">
+          <div class="metric-item">
+            <div class="metric-icon mint">↗</div><div class="metric-label">爬坡</div>
+            <div class="metric-value mint">{total_minutes}<span class="metric-unit">分钟</span></div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-icon coral">%</div><div class="metric-label">主训练坡度</div>
+            <div class="metric-value coral">{main_segment.incline_pct:g}<span class="metric-unit">%</span></div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-icon cyan">›</div><div class="metric-label">主训练速度</div>
+            <div class="metric-value cyan">{main_segment.speed_kmh:g}<span class="metric-unit">km/h</span></div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -179,13 +237,20 @@ def current_daily_context(store_: AssistantStore) -> DailyContext:
     return DailyContext.today()
 
 
-def render_daily_context_form(store_: AssistantStore, client: DeepSeekClient) -> tuple[Any, dict[str, Any]]:
+def render_daily_context_form(store_: AssistantStore) -> tuple[Any, dict[str, Any]]:
     context = current_daily_context(store_)
     with st.form("daily_context_form"):
-        st.markdown("<div class='plain-card'><div class='card-title'>今天能练多久</div>", unsafe_allow_html=True)
-        available_minutes = st.slider("可爬坡时间", 15, 90, int(context.available_minutes), step=5)
+        st.markdown(
+            """
+            <div class="daily-prompt">
+              <div class="daily-prompt-title">今天能练多久？</div>
+              <div class="daily-prompt-copy">只填这个就够了，训练强度和三餐由助手安排。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        available_minutes = st.slider("可爬坡时间", 15, 90, int(context.available_minutes), step=5, format="%d 分钟")
         submitted = st.form_submit_button("让助手安排今天", use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
     if submitted:
         context = DailyContext(
             day=date.today().isoformat(),
@@ -193,10 +258,8 @@ def render_daily_context_form(store_: AssistantStore, client: DeepSeekClient) ->
         )
         st.session_state[DAILY_CONTEXT_STATE_KEY] = context.to_dict()
         with st.spinner("助手正在安排今天..."):
-            draft, view = generate_plan(store_, use_ai=True, context=context)
-        if view.get("ai_status") != "enhanced":
-            st.warning("DeepSeek 暂时不可用或返回内容不合规，已使用本地安全规则生成。")
-        return draft, view
+            generate_plan(store_, use_ai=True, context=context)
+        st.rerun()
     return current_plan(store_)
 
 
@@ -242,7 +305,7 @@ def render_plan_image_button(draft, view: dict[str, Any]) -> None:
         f"""
         <div class="snapshot-tool">
           <button id="save-plan-image" type="button">保存今日计划图片</button>
-          <span id="save-plan-status">手机上会打开分享/保存窗口</span>
+          <span id="save-plan-status">点击后可直接保存到手机</span>
         </div>
         <script>
         const planData = {payload};
@@ -297,14 +360,14 @@ def render_plan_image_button(draft, view: dict[str, Any]) -> None:
           temp.width = width;
           temp.height = 2600;
           const ctx = temp.getContext("2d");
-          ctx.fillStyle = "#f5f7fb";
+          ctx.fillStyle = "#f7f8f9";
           ctx.fillRect(0, 0, temp.width, temp.height);
-          drawRoundedRect(ctx, 32, 32, 1016, 220, 28, "#132238");
+          drawRoundedRect(ctx, 32, 32, 1016, 220, 28, "#ff5c4d");
           ctx.fillStyle = "#ffffff";
           ctx.font = "800 54px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
           ctx.fillText("今日减脂计划", 64, 104);
           ctx.font = "400 28px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
-          ctx.fillStyle = "#d7e5ff";
+          ctx.fillStyle = "#fff1ef";
           ctx.fillText(planData.day, 64, 150);
           ctx.font = "700 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
           ctx.fillStyle = "#ffffff";
@@ -373,7 +436,7 @@ def render_plan_image_button(draft, view: dict[str, Any]) -> None:
           appearance:none;
           border:0;
           border-radius:8px;
-          background:#1b69d2;
+          background:#ff5c4d;
           color:white;
           padding:12px 16px;
           font-size:15px;
@@ -391,81 +454,106 @@ def render_plan_image_button(draft, view: dict[str, Any]) -> None:
     )
 
 
-def render_today(store_: AssistantStore, client: DeepSeekClient) -> None:
-    profile = store_.get_profile()
-    recent = store_.checkins(14)
-
-    draft, view = render_daily_context_form(store_, client)
+def render_today(store_: AssistantStore) -> None:
+    draft, view = current_plan(store_)
+    metric_cards(draft)
+    draft, view = render_daily_context_form(store_)
 
     if draft.profile_missing:
-        st.warning("档案还缺：" + "、".join(draft.profile_missing) + "。先用保守默认值生成，建议去“设置”补全。")
+        st.warning("个人档案还缺：" + "、".join(draft.profile_missing) + "。当前先按保守方案安排，去“我的”补全后会更准确。")
 
-    metric_cards(draft, recent)
-    st.caption("生成计划时会优先调用 DeepSeek；本地规则负责热量、训练强度、安全边界和忌口硬过滤。")
-
-    status_map = {"fallback": "本地规则版", "not_configured": "未配置 DeepSeek，本地规则版", "enhanced": "DeepSeek 润色版"}
-    st.markdown(f"<div class='note'><b>今日提醒</b><br>{html.escape(str(view.get('coach_note', '')))}<br><span class='small'>{status_map.get(view.get('ai_status'), '本地规则版')}</span></div>", unsafe_allow_html=True)
-
-    workout_rows = [
-        {
-            "阶段": item.name,
-            "分钟": item.minutes,
-            "坡度": f"{item.incline_pct:.1f}%",
-            "速度": f"{item.speed_kmh:.1f} km/h",
-            "体感": item.target_rpe,
-        }
+    total_minutes = sum(int(item.minutes) for item in draft.workout)
+    phase_html = '<div class="phase-line"></div>'.join(
+        f'<div class="phase-chip">{html.escape(item.name)} {item.minutes}分 · {item.incline_pct:g}%</div>'
         for item in draft.workout
-    ]
-    left, right = st.columns([1.1, 1])
-    with left:
-        st.markdown("<div class='plain-card'><div class='card-title'>跑步机爬坡</div>", unsafe_allow_html=True)
-        st.write(view.get("workout_note", ""))
-        st.dataframe(pd.DataFrame(workout_rows), use_container_width=True, hide_index=True)
-        for item in view.get("adjustments", []):
-            st.markdown(f"<span class='tag'>{html.escape(str(item))}</span>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    with right:
-        st.markdown("<div class='plain-card'><div class='card-title'>安全边界</div>", unsafe_allow_html=True)
-        for note in draft.risk_notes:
-            st.markdown(f"<div class='risk'>{html.escape(note)}</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+    )
+    adjustment = next((str(item) for item in view.get("adjustments", []) if item), "已按你的档案和近期记录安排")
+    st.markdown(
+        f"""
+        <div class="section-title">今日安排</div>
+        <div class="workout-card">
+          <div class="workout-top">
+            <div>
+              <div class="workout-name">跑步机爬坡</div>
+              <div class="workout-meta">{html.escape(str(view.get('workout_note', '按热身、主训练、冷却完成。')))}</div>
+            </div>
+            <div class="duration-badge">共 {total_minutes} 分钟</div>
+          </div>
+          <div class="phase-row">{phase_html}</div>
+          <div class="workout-meta">{html.escape(adjustment)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    lunch_col, dinner_col = st.columns(2)
-    with lunch_col:
-        st.markdown("<div class='plain-card'><div class='card-title'>午饭外食</div>", unsafe_allow_html=True)
-        for item in view.get("lunch_options", []):
-            if not isinstance(item, dict):
-                continue
-            tips = item.get("order_tips", [])
-            avoids = item.get("avoid_tips", [])
-            st.markdown(
-                f"""
-                <div class="meal-row">
-                  <div class="meal-title">{html.escape(str(item.get('title', '午饭选择')))}</div>
-                  <div class="small">约 {html.escape(str(item.get('estimate_kcal', '')))} kcal · 蛋白 {html.escape(str(item.get('protein_g', '')))} g · {html.escape(str(item.get('category', '外食')))}</div>
-                  <div>{''.join(f"<span class='tag'>{html.escape(str(tip))}</span>" for tip in tips[:3])}</div>
-                  <div class="small">{html.escape('；'.join(str(tip) for tip in avoids[:2]))}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
+    def open_checkin() -> None:
+        st.session_state["main_page"] = "记录"
 
-    with dinner_col:
-        dinner = view.get("dinner_recipe", {})
-        st.markdown("<div class='plain-card'><div class='card-title'>晚饭自煮</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='meal-title'>{html.escape(str(dinner.get('title', '家常晚饭')))}</div>", unsafe_allow_html=True)
-        st.caption(f"约 {dinner.get('estimate_kcal', '')} kcal · 蛋白 {dinner.get('protein_g', '')} g · {dinner.get('cook_minutes', '')} 分钟")
-        st.write("食材：" + "、".join(str(item) for item in dinner.get("ingredients", [])))
-        for index, step in enumerate(dinner.get("steps", []), start=1):
-            st.write(f"{index}. {step}")
-        structure = dinner.get("structure", {})
-        if isinstance(structure, dict):
-            for key, value in structure.items():
-                st.markdown(f"<span class='tag'>{html.escape(str(key))}: {html.escape(str(value))}</span>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.button("完成后去打卡", key="go_checkin", use_container_width=True, on_click=open_checkin)
+
+    lunches = [item for item in view.get("lunch_options", []) if isinstance(item, dict)]
+    lunch = lunches[0] if lunches else {"title": "优先选一份蛋白质和蔬菜", "category": "外食", "order_tips": []}
+    lunch_tips = [str(item) for item in lunch.get("order_tips", []) if item]
+    lunch_detail = " · ".join(lunch_tips[:2]) or "少油少酱，主食吃半份"
+    dinner = view.get("dinner_recipe", {})
+    if not isinstance(dinner, dict):
+        dinner = {}
+    dinner_structure = dinner.get("structure", {}) if isinstance(dinner.get("structure", {}), dict) else {}
+    dinner_detail = " · ".join(str(value) for value in list(dinner_structure.values())[:2] if value)
+    if not dinner_detail:
+        dinner_detail = f"约 {dinner.get('cook_minutes', 30)} 分钟做好"
+
+    st.markdown(
+        f"""
+        <div class="meal-grid">
+          <div class="meal-card">
+            <div class="meal-kicker">午饭 · 外食</div>
+            <div class="meal-name">{html.escape(str(lunch.get('title', '午饭选择')))}</div>
+            <div class="meal-detail">{html.escape(lunch_detail)}<br>约 {html.escape(str(lunch.get('estimate_kcal', '')))} kcal · 蛋白 {html.escape(str(lunch.get('protein_g', '')))} g</div>
+            <div class="meal-art lunch">午</div>
+          </div>
+          <div class="meal-card">
+            <div class="meal-kicker">晚饭 · 自煮</div>
+            <div class="meal-name">{html.escape(str(dinner.get('title', '家常晚饭')))}</div>
+            <div class="meal-detail">{html.escape(dinner_detail)}<br>约 {html.escape(str(dinner.get('estimate_kcal', '')))} kcal · 蛋白 {html.escape(str(dinner.get('protein_g', '')))} g</div>
+            <div class="meal-art dinner">晚</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    detail_left, detail_right = st.columns(2)
+    with detail_left:
+        with st.expander("查看午饭备选和点单方法"):
+            for item in lunches:
+                st.markdown(f"**{item.get('title', '午饭选择')}** · 约 {item.get('estimate_kcal', '')} kcal")
+                for tip in item.get("order_tips", [])[:3]:
+                    st.write("- " + str(tip))
+    with detail_right:
+        with st.expander("查看晚饭食材和做法"):
+            ingredients = [str(item) for item in dinner.get("ingredients", [])]
+            if ingredients:
+                st.write("食材：" + "、".join(ingredients))
+            for index, step in enumerate(dinner.get("steps", []), start=1):
+                st.write(f"{index}. {step}")
+
+    ai_label = "AI 已结合你的情况安排" if view.get("ai_status") == "enhanced" else "助手已按安全规则安排"
+    st.markdown(
+        f"""
+        <div class="assistant-note">
+          <div class="assistant-mark">助</div>
+          <div><b>{ai_label}</b><br>{html.escape(str(view.get('coach_note', '照着今天的安排做就好。')))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     render_plan_image_button(draft, view)
+
+    with st.expander("安全提醒"):
+        for note in draft.risk_notes:
+            st.markdown(f"<div class='risk'>{html.escape(note)}</div>", unsafe_allow_html=True)
 
 
 def render_checkin(store_: AssistantStore) -> None:
@@ -635,14 +723,12 @@ def main() -> None:
     client = DeepSeekClient()
     profile = store_.get_profile()
     top_header(profile, client)
-    st.sidebar.markdown("<div style='font-size:22px;font-weight:900;margin:4px 2px 20px;'>减脂助手</div>", unsafe_allow_html=True)
-    st.sidebar.caption("手机端也可以直接使用页面顶部导航。")
     page = st.radio("导航", PAGES, horizontal=True, label_visibility="collapsed", key="main_page")
-    if page == "今日计划":
-        render_today(store_, client)
-    elif page == "打卡记录":
+    if page == "今日":
+        render_today(store_)
+    elif page == "记录":
         render_checkin(store_)
-    elif page == "菜单库":
+    elif page == "菜单":
         render_menu_library()
     else:
         render_settings(store_, client)

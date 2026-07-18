@@ -6,8 +6,7 @@ gatherUsageStats = false
 
 [theme]
 base = "light"
-primaryColor = "#1b69d2"
-backgroundColor = "#f5f7fb"
+primaryColor = "#ff5c4d"
+backgroundColor = "#f7f8f9"
 secondaryBackgroundColor = "#ffffff"
-textColor = "#172033"
-
+textColor = "#14191f"
