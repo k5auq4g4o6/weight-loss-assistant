@@ -21,6 +21,7 @@ from fatloss.storage import AssistantStore
 st.set_page_config(page_title="减脂计划小助手", page_icon="L", layout="wide", initial_sidebar_state="expanded")
 
 PAGES = ["今日计划", "打卡记录", "菜单库", "设置"]
+DAILY_CONTEXT_STATE_KEY = "daily_context_payload"
 
 
 @st.cache_resource
@@ -135,7 +136,7 @@ def current_plan(store_: AssistantStore) -> tuple[Any, dict[str, Any]]:
 
 
 def current_daily_context(store_: AssistantStore) -> DailyContext:
-    saved = DailyContext.from_dict(st.session_state.get("daily_context"))
+    saved = DailyContext.from_dict(st.session_state.get(DAILY_CONTEXT_STATE_KEY))
     if saved and saved.day == date.today().isoformat():
         return saved
     checkin = store_.get_checkin(date.today().isoformat())
@@ -154,7 +155,7 @@ def current_daily_context(store_: AssistantStore) -> DailyContext:
 
 def render_daily_context_form(store_: AssistantStore, client: DeepSeekClient) -> tuple[Any, dict[str, Any]]:
     context = current_daily_context(store_)
-    with st.form("daily_context"):
+    with st.form("daily_context_form"):
         st.markdown("<div class='plain-card'><div class='card-title'>今天实际情况</div>", unsafe_allow_html=True)
         cols = st.columns(4)
         available_minutes = cols[0].slider("今天可爬坡时间", 15, 90, int(context.available_minutes), step=5)
@@ -175,7 +176,7 @@ def render_daily_context_form(store_: AssistantStore, client: DeepSeekClient) ->
             body_status=body_status.strip() or "无明显不适",
             notes=notes.strip(),
         )
-        st.session_state["daily_context"] = context.to_dict()
+        st.session_state[DAILY_CONTEXT_STATE_KEY] = context.to_dict()
         with st.spinner("正在根据今天状态生成计划..."):
             draft, view = generate_plan(store_, use_ai=True, context=context)
         if view.get("ai_status") != "enhanced":
