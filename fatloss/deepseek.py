@@ -26,7 +26,13 @@ class DeepSeekClient:
     def configured(self) -> bool:
         return bool(self.api_key)
 
-    def enhance_plan(self, draft: Any, profile: Any, context: Any | None = None) -> dict[str, Any]:
+    def enhance_plan(
+        self,
+        draft: Any,
+        profile: Any,
+        context: Any | None = None,
+        recent_checkins: list[Any] | None = None,
+    ) -> dict[str, Any]:
         if not self.configured:
             raise DeepSeekError("DeepSeek API Key 未配置。")
         payload = {
@@ -35,12 +41,13 @@ class DeepSeekClient:
                 {
                     "role": "system",
                     "content": (
-                        "你是谨慎的中文减脂计划助手。根据用户当天实际状态，把规则引擎给出的减脂草案整理成可执行计划。"
+                        "你是主动型中文减脂助理。用户每天只输入今天可爬坡时间，其他由你根据档案、近 7 天打卡和规则草案直接安排。"
+                        "不要反问用户，不要让用户再做选择；给出清楚、可执行的一版今日计划。"
                         "不得提高训练强度，不突破热量、蛋白、安全提醒边界，不提供医疗诊断。"
                         "用户忌口和不喜欢的食物是硬约束，午饭、晚饭、食材、替代建议里都不得出现。必须返回严格 JSON。"
                     ),
                 },
-                {"role": "user", "content": self._prompt(draft, profile, context)},
+                {"role": "user", "content": self._prompt(draft, profile, context, recent_checkins)},
             ],
             "temperature": 0.4,
         }
@@ -57,20 +64,34 @@ class DeepSeekClient:
             raise DeepSeekError(str(exc)) from exc
         return parse_json_object(content)
 
-    def _prompt(self, draft: Any, profile: Any, context: Any | None = None) -> str:
+    def _prompt(self, draft: Any, profile: Any, context: Any | None = None, recent_checkins: list[Any] | None = None) -> str:
         blocked_foods = list(dict.fromkeys(profile.avoid_foods + profile.disliked_foods))
+        history = [
+            {
+                "day": item.day,
+                "weight_kg": item.weight_kg,
+                "workout_done": item.workout_done,
+                "workout_minutes": item.workout_minutes,
+                "effort_rpe": item.rpe,
+                "lunch_feedback": item.lunch_feedback,
+                "dinner_feedback": item.dinner_feedback,
+                "notes": item.notes,
+            }
+            for item in (recent_checkins or [])[:7]
+        ]
         return json.dumps(
             {
                 "profile": profile.to_dict(),
                 "daily_context": context.to_dict() if context else None,
+                "recent_checkins": history,
                 "blocked_foods_do_not_use": blocked_foods,
                 "draft": draft.to_dict(),
                 "required_json_schema": {
-                    "coach_note": "一句自然中文提醒，鼓励但不鸡血",
-                    "workout_note": "解释今天爬坡强度为什么这样安排",
+                    "coach_note": "一句自然中文提醒，像助理直接安排好，不要提问",
+                    "workout_note": "解释今天爬坡强度为什么这样安排，要结合可锻炼时间和近期完成情况",
                     "lunch_options": "午饭外食列表，只能是购买/点餐建议，不能有烹饪步骤，不能出现 blocked_foods_do_not_use",
                     "dinner_recipe": "晚饭自煮菜谱，必须包含 title/ingredients/steps/structure，不能出现 blocked_foods_do_not_use",
-                    "adjustments": "今天相比昨天的调整列表",
+                    "adjustments": "根据今天可锻炼时间、档案和近 7 天记录做出的调整列表",
                 },
             },
             ensure_ascii=False,

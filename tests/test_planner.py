@@ -31,8 +31,8 @@ def test_treadmill_plan_deloads_after_hard_day():
     hard_yesterday = CheckIn(day="2026-07-17", workout_done=True, rpe=9, fatigue=5, sleep_quality=1)
     draft = PlanEngine(date(2026, 7, 18)).create_draft(profile, hard_yesterday, context)
     main = next(segment for segment in draft.workout if segment.name == "主训练")
-    assert main.incline_pct == 6
-    assert main.speed_kmh == 4.8
+    assert main.incline_pct == 5.5
+    assert main.speed_kmh == 4.6
     assert main.minutes == 22
     assert any("降低坡度" in item for item in draft.adjustments)
 
@@ -43,8 +43,53 @@ def test_treadmill_plan_progresses_after_easy_success():
     easy_yesterday = CheckIn(day="2026-07-17", workout_done=True, rpe=5, fatigue=2, sleep_quality=4)
     draft = PlanEngine(date(2026, 7, 18)).create_draft(profile, easy_yesterday, context)
     main = next(segment for segment in draft.workout if segment.name == "主训练")
-    assert main.incline_pct == 8.5
+    assert main.incline_pct == 8.0
     assert main.minutes == 25
+
+
+def test_treadmill_plan_only_needs_available_minutes():
+    profile = Profile(age=32, height_cm=165, current_weight_kg=70)
+    short = PlanEngine(date(2026, 7, 18)).create_draft(profile, context=DailyContext(day="2026-07-18", available_minutes=20))
+    long = PlanEngine(date(2026, 7, 18)).create_draft(profile, context=DailyContext(day="2026-07-18", available_minutes=60))
+    short_main = next(segment for segment in short.workout if segment.name == "主训练")
+    long_main = next(segment for segment in long.workout if segment.name == "主训练")
+    assert short_main.minutes == 10
+    assert long_main.minutes == 50
+    assert short_main.incline_pct < long_main.incline_pct
+
+
+def test_treadmill_plan_uses_recent_history_to_progress():
+    profile = Profile(age=32, height_cm=165, current_weight_kg=70)
+    recent = [
+        CheckIn(day="2026-07-17", workout_done=True, workout_minutes=40, rpe=6, fatigue=3),
+        CheckIn(day="2026-07-16", workout_done=True, workout_minutes=40, rpe=6, fatigue=3),
+        CheckIn(day="2026-07-15", workout_done=True, workout_minutes=35, rpe=5, fatigue=2),
+        CheckIn(day="2026-07-14", workout_done=True, workout_minutes=35, rpe=6, fatigue=3),
+    ]
+    draft = PlanEngine(date(2026, 7, 18)).create_draft(
+        profile,
+        context=DailyContext(day="2026-07-18", available_minutes=40),
+        recent_checkins=recent,
+    )
+    main = next(segment for segment in draft.workout if segment.name == "主训练")
+    assert main.incline_pct == 8.0
+    assert any("近 7 天完成稳定" in item for item in draft.adjustments)
+
+
+def test_treadmill_plan_avoids_big_jump_from_recent_minutes():
+    profile = Profile(age=32, height_cm=165, current_weight_kg=70)
+    recent = [
+        CheckIn(day="2026-07-17", workout_done=True, workout_minutes=20, rpe=6, fatigue=3),
+        CheckIn(day="2026-07-16", workout_done=True, workout_minutes=20, rpe=6, fatigue=3),
+    ]
+    draft = PlanEngine(date(2026, 7, 18)).create_draft(
+        profile,
+        context=DailyContext(day="2026-07-18", available_minutes=60),
+        recent_checkins=recent,
+    )
+    total_minutes = sum(segment.minutes for segment in draft.workout)
+    assert total_minutes == 30
+    assert any("近期实际完成时长较短" in item for item in draft.adjustments)
 
 
 def test_lunch_has_no_cooking_steps_and_dinner_has_steps():
@@ -74,7 +119,7 @@ def test_ai_food_blocks_are_hard_filtered():
     class BeefClient:
         configured = True
 
-        def enhance_plan(self, draft, profile, context=None):
+        def enhance_plan(self, draft, profile, context=None, recent_checkins=None):
             return {
                 "coach_note": "ok",
                 "workout_note": "ok",

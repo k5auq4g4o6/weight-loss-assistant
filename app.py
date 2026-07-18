@@ -83,6 +83,24 @@ def join_items(items: list[str]) -> str:
     return ", ".join(items)
 
 
+def effort_label_from_rpe(rpe: int) -> str:
+    if rpe <= 5:
+        return "偏轻松"
+    if rpe <= 7:
+        return "正好"
+    if rpe <= 8:
+        return "有点吃力"
+    return "太累"
+
+
+def rpe_from_effort(label: str) -> int:
+    return {"偏轻松": 5, "正好": 6, "有点吃力": 8, "太累": 9}.get(label, 6)
+
+
+def fatigue_from_effort(label: str) -> int:
+    return {"偏轻松": 2, "正好": 3, "有点吃力": 4, "太累": 5}.get(label, 3)
+
+
 def top_header(profile: Profile | None, client: DeepSeekClient) -> None:
     name = profile.name if profile else "未建档"
     status = "DeepSeek 已配置" if client.configured else "本地规则模式"
@@ -101,15 +119,16 @@ def top_header(profile: Profile | None, client: DeepSeekClient) -> None:
 
 
 def metric_cards(draft, recent: list[CheckIn]) -> None:
-    done_count = sum(1 for item in recent[:7] if item.workout_done)
-    avg_hunger = [item.hunger for item in recent[:7] if item.hunger]
-    hunger_label = f"{sum(avg_hunger) / len(avg_hunger):.1f}/5" if avg_hunger else "待记录"
+    recent_week = recent[:7]
+    done_count = sum(1 for item in recent_week if item.workout_done)
+    done_minutes = [item.workout_minutes for item in recent_week if item.workout_done and item.workout_minutes]
+    minutes_label = f"{sum(done_minutes) / len(done_minutes):.0f} 分/次" if done_minutes else "待记录"
     st.markdown(
         f"""
         <div class="metric-grid">
           <div class="metric-card"><div class="metric-label">今日热量范围</div><div class="metric-value">{draft.calorie_range[0]}-{draft.calorie_range[1]}</div><div class="metric-help">kcal，稳健缺口</div></div>
           <div class="metric-card"><div class="metric-label">蛋白目标</div><div class="metric-value">{draft.protein_g} g</div><div class="metric-help">优先分配到午饭和晚饭</div></div>
-          <div class="metric-card"><div class="metric-label">近 7 天爬坡</div><div class="metric-value">{done_count}/7</div><div class="metric-help">平均饥饿感 {hunger_label}</div></div>
+          <div class="metric-card"><div class="metric-label">近 7 天爬坡</div><div class="metric-value">{done_count}/7</div><div class="metric-help">平均完成 {minutes_label}</div></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -120,9 +139,10 @@ def generate_plan(store_: AssistantStore, use_ai: bool, context: DailyContext | 
     today = date.today().isoformat()
     profile = store_.get_profile()
     yesterday = store_.latest_checkin_before(today)
+    recent = store_.checkins(14)
     context = context or DailyContext(day=today)
-    draft = PlanEngine(date.today()).create_draft(profile, yesterday, context)
-    view = build_plan_view(draft, profile, use_ai=use_ai, context=context)
+    draft = PlanEngine(date.today()).create_draft(profile, yesterday, context, recent_checkins=recent)
+    view = build_plan_view(draft, profile, use_ai=use_ai, context=context, recent_checkins=recent)
     store_.save_plan(today, draft.to_dict(), view, view.get("ai_status", "fallback"))
     st.session_state["today_draft"] = draft
     st.session_state["today_view"] = view
@@ -131,7 +151,7 @@ def generate_plan(store_: AssistantStore, use_ai: bool, context: DailyContext | 
 
 def current_plan(store_: AssistantStore) -> tuple[Any, dict[str, Any]]:
     if "today_draft" not in st.session_state or "today_view" not in st.session_state:
-        return generate_plan(store_, use_ai=False)
+        return generate_plan(store_, use_ai=True, context=current_daily_context(store_))
     return st.session_state["today_draft"], st.session_state["today_view"]
 
 
@@ -144,11 +164,6 @@ def current_daily_context(store_: AssistantStore) -> DailyContext:
         return DailyContext(
             day=checkin.day,
             available_minutes=max(15, checkin.workout_minutes or 35),
-            sleep_quality=checkin.sleep_quality,
-            fatigue=checkin.fatigue,
-            hunger=checkin.hunger,
-            body_status="无明显不适",
-            notes=checkin.notes,
         )
     return DailyContext.today()
 
@@ -156,28 +171,17 @@ def current_daily_context(store_: AssistantStore) -> DailyContext:
 def render_daily_context_form(store_: AssistantStore, client: DeepSeekClient) -> tuple[Any, dict[str, Any]]:
     context = current_daily_context(store_)
     with st.form("daily_context_form"):
-        st.markdown("<div class='plain-card'><div class='card-title'>今天实际情况</div>", unsafe_allow_html=True)
-        cols = st.columns(4)
-        available_minutes = cols[0].slider("今天可爬坡时间", 15, 90, int(context.available_minutes), step=5)
-        sleep_quality = cols[1].slider("睡眠质量", 1, 5, int(context.sleep_quality))
-        fatigue = cols[2].slider("疲劳感", 1, 5, int(context.fatigue))
-        hunger = cols[3].slider("饥饿感", 1, 5, int(context.hunger))
-        body_status = st.text_input("身体状态", value=context.body_status, placeholder="比如：无明显不适 / 膝盖不舒服 / 小腿酸")
-        notes = st.text_input("今日补充", value=context.notes, placeholder="比如：今天很忙、晚上只能练短一点、午饭想吃食堂")
-        submitted = st.form_submit_button("按今天状态生成计划", use_container_width=True)
+        st.markdown("<div class='plain-card'><div class='card-title'>今天能练多久</div>", unsafe_allow_html=True)
+        available_minutes = st.slider("可爬坡时间", 15, 90, int(context.available_minutes), step=5)
+        submitted = st.form_submit_button("让助手安排今天", use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
     if submitted:
         context = DailyContext(
             day=date.today().isoformat(),
             available_minutes=int(available_minutes),
-            sleep_quality=int(sleep_quality),
-            fatigue=int(fatigue),
-            hunger=int(hunger),
-            body_status=body_status.strip() or "无明显不适",
-            notes=notes.strip(),
         )
         st.session_state[DAILY_CONTEXT_STATE_KEY] = context.to_dict()
-        with st.spinner("正在根据今天状态生成计划..."):
+        with st.spinner("助手正在安排今天..."):
             draft, view = generate_plan(store_, use_ai=True, context=context)
         if view.get("ai_status") != "enhanced":
             st.warning("DeepSeek 暂时不可用或返回内容不合规，已使用本地安全规则生成。")
@@ -461,32 +465,29 @@ def render_checkin(store_: AssistantStore) -> None:
     with st.form("checkin"):
         weight_default = float(existing.weight_kg or (profile.current_weight_kg if profile and profile.current_weight_kg else 70.0))
         weight_kg = st.number_input("今日体重 kg", min_value=30.0, max_value=250.0, value=weight_default, step=0.1)
-        cols = st.columns(4)
+        cols = st.columns(3)
         workout_done = cols[0].checkbox("完成爬坡", value=existing.workout_done)
-        workout_minutes = cols[1].number_input("爬坡分钟", min_value=0, max_value=180, value=int(existing.workout_minutes), step=5)
-        avg_incline = cols[2].number_input("平均坡度 %", min_value=0.0, max_value=20.0, value=float(existing.avg_incline_pct), step=0.5)
-        avg_speed = cols[3].number_input("平均速度 km/h", min_value=0.0, max_value=12.0, value=float(existing.avg_speed_kmh), step=0.1)
-        rpe = st.slider("训练体感 RPE", 1, 10, int(existing.rpe), help="1 很轻松，10 接近极限")
-        cols2 = st.columns(3)
-        sleep = cols2[0].slider("睡眠质量", 1, 5, int(existing.sleep_quality))
-        fatigue = cols2[1].slider("疲劳感", 1, 5, int(existing.fatigue))
-        hunger = cols2[2].slider("饥饿感", 1, 5, int(existing.hunger))
+        workout_minutes = cols[1].number_input("实际爬坡分钟", min_value=0, max_value=180, value=int(existing.workout_minutes), step=5)
+        effort_options = ["正好", "偏轻松", "有点吃力", "太累"]
+        effort_default = effort_label_from_rpe(int(existing.rpe))
+        effort = cols[2].selectbox("练完感觉", effort_options, index=effort_options.index(effort_default))
         lunch_feedback = st.text_input("午饭反馈", value=existing.lunch_feedback, placeholder="比如：盖饭吃了半份饭，下午不饿")
         dinner_feedback = st.text_input("晚饭反馈", value=existing.dinner_feedback, placeholder="比如：鸡腿饭好做，但饭可以再少一点")
-        notes = st.text_area("其他备注", value=existing.notes, height=90)
+        notes = st.text_area("备注", value=existing.notes, height=80)
         submitted = st.form_submit_button("保存今日打卡", use_container_width=True)
     if submitted:
+        rpe = rpe_from_effort(effort) if workout_done else 6
         checkin = CheckIn(
             day=day,
             weight_kg=weight_kg,
             workout_done=workout_done,
             workout_minutes=int(workout_minutes),
-            avg_incline_pct=float(avg_incline),
-            avg_speed_kmh=float(avg_speed),
+            avg_incline_pct=float(existing.avg_incline_pct),
+            avg_speed_kmh=float(existing.avg_speed_kmh),
             rpe=int(rpe),
-            sleep_quality=int(sleep),
-            fatigue=int(fatigue),
-            hunger=int(hunger),
+            sleep_quality=3,
+            fatigue=fatigue_from_effort(effort) if workout_done else 3,
+            hunger=3,
             lunch_feedback=lunch_feedback,
             dinner_feedback=dinner_feedback,
             notes=notes,
@@ -501,7 +502,21 @@ def render_checkin(store_: AssistantStore) -> None:
 
     recent = store_.checkins(30)
     if recent:
-        frame = pd.DataFrame([item.to_dict() for item in recent])
+        frame = pd.DataFrame(
+            [
+                {
+                    "日期": item.day,
+                    "体重 kg": item.weight_kg,
+                    "完成爬坡": "是" if item.workout_done else "否",
+                    "实际分钟": item.workout_minutes,
+                    "练完感觉": effort_label_from_rpe(item.rpe),
+                    "午饭反馈": item.lunch_feedback,
+                    "晚饭反馈": item.dinner_feedback,
+                    "备注": item.notes,
+                }
+                for item in recent
+            ]
+        )
         st.subheader("最近记录")
         st.dataframe(frame, use_container_width=True, hide_index=True)
 
