@@ -13,8 +13,8 @@ import streamlit.components.v1 as components
 from fatloss.config import save_env_values
 from fatloss.deepseek import DeepSeekClient
 from fatloss.menu import DINNER_LIBRARY, LUNCH_LIBRARY
-from fatloss.models import CheckIn, Profile
-from fatloss.planner import PlanEngine, build_plan_view, plan_to_markdown
+from fatloss.models import CheckIn, DailyContext, Profile
+from fatloss.planner import PlanEngine, build_plan_view
 from fatloss.storage import AssistantStore
 
 
@@ -115,12 +115,13 @@ def metric_cards(draft, recent: list[CheckIn]) -> None:
     )
 
 
-def generate_plan(store_: AssistantStore, use_ai: bool) -> tuple[Any, dict[str, Any]]:
+def generate_plan(store_: AssistantStore, use_ai: bool, context: DailyContext | None = None) -> tuple[Any, dict[str, Any]]:
     today = date.today().isoformat()
     profile = store_.get_profile()
     yesterday = store_.latest_checkin_before(today)
-    draft = PlanEngine(date.today()).create_draft(profile, yesterday)
-    view = build_plan_view(draft, profile, use_ai=use_ai)
+    context = context or DailyContext(day=today)
+    draft = PlanEngine(date.today()).create_draft(profile, yesterday, context)
+    view = build_plan_view(draft, profile, use_ai=use_ai, context=context)
     store_.save_plan(today, draft.to_dict(), view, view.get("ai_status", "fallback"))
     st.session_state["today_draft"] = draft
     st.session_state["today_view"] = view
@@ -131,6 +132,56 @@ def current_plan(store_: AssistantStore) -> tuple[Any, dict[str, Any]]:
     if "today_draft" not in st.session_state or "today_view" not in st.session_state:
         return generate_plan(store_, use_ai=False)
     return st.session_state["today_draft"], st.session_state["today_view"]
+
+
+def current_daily_context(store_: AssistantStore) -> DailyContext:
+    saved = DailyContext.from_dict(st.session_state.get("daily_context"))
+    if saved and saved.day == date.today().isoformat():
+        return saved
+    checkin = store_.get_checkin(date.today().isoformat())
+    if checkin:
+        return DailyContext(
+            day=checkin.day,
+            available_minutes=max(15, checkin.workout_minutes or 35),
+            sleep_quality=checkin.sleep_quality,
+            fatigue=checkin.fatigue,
+            hunger=checkin.hunger,
+            body_status="无明显不适",
+            notes=checkin.notes,
+        )
+    return DailyContext.today()
+
+
+def render_daily_context_form(store_: AssistantStore, client: DeepSeekClient) -> tuple[Any, dict[str, Any]]:
+    context = current_daily_context(store_)
+    with st.form("daily_context"):
+        st.markdown("<div class='plain-card'><div class='card-title'>今天实际情况</div>", unsafe_allow_html=True)
+        cols = st.columns(4)
+        available_minutes = cols[0].slider("今天可爬坡时间", 15, 90, int(context.available_minutes), step=5)
+        sleep_quality = cols[1].slider("睡眠质量", 1, 5, int(context.sleep_quality))
+        fatigue = cols[2].slider("疲劳感", 1, 5, int(context.fatigue))
+        hunger = cols[3].slider("饥饿感", 1, 5, int(context.hunger))
+        body_status = st.text_input("身体状态", value=context.body_status, placeholder="比如：无明显不适 / 膝盖不舒服 / 小腿酸")
+        notes = st.text_input("今日补充", value=context.notes, placeholder="比如：今天很忙、晚上只能练短一点、午饭想吃食堂")
+        submitted = st.form_submit_button("按今天状态生成计划", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    if submitted:
+        context = DailyContext(
+            day=date.today().isoformat(),
+            available_minutes=int(available_minutes),
+            sleep_quality=int(sleep_quality),
+            fatigue=int(fatigue),
+            hunger=int(hunger),
+            body_status=body_status.strip() or "无明显不适",
+            notes=notes.strip(),
+        )
+        st.session_state["daily_context"] = context.to_dict()
+        with st.spinner("正在根据今天状态生成计划..."):
+            draft, view = generate_plan(store_, use_ai=True, context=context)
+        if view.get("ai_status") != "enhanced":
+            st.warning("DeepSeek 暂时不可用或返回内容不合规，已使用本地安全规则生成。")
+        return draft, view
+    return current_plan(store_)
 
 
 def plan_snapshot_payload(draft, view: dict[str, Any]) -> dict[str, Any]:
@@ -326,21 +377,15 @@ def render_plan_image_button(draft, view: dict[str, Any]) -> None:
 
 def render_today(store_: AssistantStore, client: DeepSeekClient) -> None:
     profile = store_.get_profile()
-    draft, view = current_plan(store_)
     recent = store_.checkins(14)
+
+    draft, view = render_daily_context_form(store_, client)
 
     if draft.profile_missing:
         st.warning("档案还缺：" + "、".join(draft.profile_missing) + "。先用保守默认值生成，建议去“设置”补全。")
 
     metric_cards(draft, recent)
-
-    cols = st.columns([1, 1, 3])
-    if cols[0].button("生成本地计划", use_container_width=True):
-        draft, view = generate_plan(store_, use_ai=False)
-    if cols[1].button("用 DeepSeek 润色", use_container_width=True, disabled=not client.configured):
-        with st.spinner("正在让 DeepSeek 把计划整理成更顺口的版本..."):
-            draft, view = generate_plan(store_, use_ai=True)
-    cols[2].caption("本地规则负责热量、蛋白、训练强度和安全边界；DeepSeek 只做表达和菜单重组。")
+    st.caption("生成计划时会优先调用 DeepSeek；本地规则负责热量、训练强度、安全边界和忌口硬过滤。")
 
     status_map = {"fallback": "本地规则版", "not_configured": "未配置 DeepSeek，本地规则版", "enhanced": "DeepSeek 润色版"}
     st.markdown(f"<div class='note'><b>今日提醒</b><br>{html.escape(str(view.get('coach_note', '')))}<br><span class='small'>{status_map.get(view.get('ai_status'), '本地规则版')}</span></div>", unsafe_allow_html=True)
@@ -404,13 +449,6 @@ def render_today(store_: AssistantStore, client: DeepSeekClient) -> None:
                 st.markdown(f"<span class='tag'>{html.escape(str(key))}: {html.escape(str(value))}</span>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    st.download_button(
-        "下载今日计划 Markdown",
-        data=plan_to_markdown(draft, view),
-        file_name=f"fatloss-plan-{draft.day}.md",
-        mime="text/markdown",
-        use_container_width=True,
-    )
     render_plan_image_button(draft, view)
 
 
@@ -499,12 +537,6 @@ def render_settings(store_: AssistantStore, client: DeepSeekClient) -> None:
         cols4 = st.columns(2)
         cookware = cols4[0].text_input("可用厨具", value=join_items(profile.cookware))
         taste_preferences = cols4[1].text_input("口味偏好", value=join_items(profile.taste_preferences))
-        st.markdown("跑步机默认参数")
-        cols5 = st.columns(4)
-        incline = cols5[0].number_input("坡度 %", min_value=0.0, max_value=20.0, value=float(profile.treadmill_incline_pct), step=0.5)
-        speed = cols5[1].number_input("速度 km/h", min_value=2.0, max_value=10.0, value=float(profile.treadmill_speed_kmh), step=0.1)
-        minutes = cols5[2].number_input("总时长 分钟", min_value=15, max_value=120, value=int(profile.treadmill_minutes), step=5)
-        usual_rpe = cols5[3].slider("常规体感", 1, 10, int(profile.usual_rpe))
         submitted = st.form_submit_button("保存档案", use_container_width=True)
     if submitted:
         saved = Profile(
@@ -522,10 +554,6 @@ def render_settings(store_: AssistantStore, client: DeepSeekClient) -> None:
             dinner_minutes=int(dinner_minutes),
             cookware=parse_csv_text(cookware),
             taste_preferences=parse_csv_text(taste_preferences),
-            treadmill_incline_pct=float(incline),
-            treadmill_speed_kmh=float(speed),
-            treadmill_minutes=int(minutes),
-            usual_rpe=int(usual_rpe),
         )
         store_.save_profile(saved)
         st.session_state.pop("today_draft", None)
