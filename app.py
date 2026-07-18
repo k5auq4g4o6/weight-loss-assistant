@@ -19,7 +19,14 @@ from fatloss.storage import AssistantStore
 
 st.set_page_config(page_title="减肥助手", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
 
-PAGES = ["今日", "记录", "菜单", "我的"]
+PAGE_ITEMS = [
+    {"key": "today", "label": "今日"},
+    {"key": "record", "label": "记录"},
+    {"key": "menu", "label": "菜单"},
+    {"key": "profile", "label": "我的"},
+]
+PAGE_LABELS = {item["key"]: item["label"] for item in PAGE_ITEMS}
+PAGE_ALIASES = {item["label"]: item["key"] for item in PAGE_ITEMS}
 DAILY_CONTEXT_STATE_KEY = "daily_context_payload"
 
 
@@ -36,8 +43,8 @@ def apply_style() -> None:
         html,body,[class*="css"]{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:0;}
         .stApp{background:var(--bg);color:var(--ink);}
         header[data-testid="stHeader"]{height:0;min-height:0;background:transparent!important;}
-        [data-testid="stToolbar"],.stDeployButton,[data-testid="stDecoration"],#MainMenu,footer,[data-testid="stSidebar"],[data-testid="collapsedControl"]{display:none!important;}
-        .stMainBlockContainer,.main .block-container{max-width:980px;padding:30px 24px 110px;}
+        [data-testid="stToolbar"],[data-testid="stToolbarActions"],[data-testid="stStatusWidget"],[data-testid="stAppDeployButton"],[data-testid="manage-app-button"],.stDeployButton,[data-testid="stDecoration"],[class*="_viewerBadge_"],[class*="_profileContainer_"],#MainMenu,footer,[data-testid="stSidebar"],[data-testid="collapsedControl"]{display:none!important;visibility:hidden!important;width:0!important;height:0!important;}
+        .stMainBlockContainer,.main .block-container{max-width:980px;padding:30px 24px calc(126px + env(safe-area-inset-bottom));}
         .app-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin:0 0 16px;}
         .app-title{font-size:38px;font-weight:900;color:#0c1116;line-height:1.05;margin:0;}
         .app-date{color:var(--muted);font-size:15px;margin-top:9px;}
@@ -86,33 +93,26 @@ def apply_style() -> None:
         .risk{border-left:4px solid var(--coral);background:#fff5f3;padding:12px 14px;border-radius:6px;color:#71342e;margin:8px 0;}
         .tag{display:inline-block;background:#eef8f6;color:#25735f;border-radius:6px;padding:4px 7px;margin:5px 5px 0 0;font-size:11px;font-weight:750;}
         .source-block{background:#181d22;color:#f9fafb;border-radius:8px;padding:13px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;}
+        .primary-action-link{display:flex;align-items:center;justify-content:center;width:100%;min-height:42px;border-radius:8px;background:var(--coral);color:#fff!important;text-decoration:none!important;font-size:15px;font-weight:850;margin:10px 0 2px;}
+        .primary-action-link:hover{background:var(--coral-dark);color:#fff!important;text-decoration:none!important;}
         .stButton button,.stDownloadButton button,[data-testid="stFormSubmitButton"] button{border-radius:8px;background:var(--coral);color:#fff;border:0;font-weight:850;min-height:42px;}
         .stButton button:hover,.stDownloadButton button:hover,[data-testid="stFormSubmitButton"] button:hover{background:var(--coral-dark);color:#fff;border:0;}
         [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:8px;overflow:hidden;}
         [data-testid="stExpander"]{background:#fff;border:1px solid var(--line);border-radius:8px!important;overflow:hidden;}
-        [data-testid="stRadio"]{margin:0 0 20px;}
-        div[role="radiogroup"]{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px;}
-        div[role="radiogroup"] label{display:flex;justify-content:center;background:transparent;border:0;border-radius:6px;padding:9px 8px;margin:0;}
-        div[role="radiogroup"] label p{color:#7d8288!important;font-size:14px!important;font-weight:750!important;}
-        div[role="radiogroup"] label p:before{display:block;font-size:18px;line-height:18px;margin-bottom:4px;font-weight:850;}
-        div[role="radiogroup"] label:nth-child(1) p:before{content:"⌂";}
-        div[role="radiogroup"] label:nth-child(2) p:before{content:"✓";}
-        div[role="radiogroup"] label:nth-child(3) p:before{content:"☷";}
-        div[role="radiogroup"] label:nth-child(4) p:before{content:"○";}
-        div[role="radiogroup"] label:has(input:checked){background:#fff1ef;}
-        div[role="radiogroup"] label:has(input:checked) p{color:var(--coral)!important;font-weight:900!important;}
-        div[role="radiogroup"] label>div:first-child{display:none!important;}
+        .bottom-nav{position:fixed;left:50%;right:auto;bottom:0;transform:translateX(-50%);z-index:2147483000;width:min(520px,100vw);box-sizing:border-box;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;background:rgba(255,255,255,.98);border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(30,38,44,.08);padding:7px 8px calc(7px + env(safe-area-inset-bottom));}
+        .bottom-nav-link{min-width:0;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-radius:8px;color:#7d8288!important;text-decoration:none!important;font-size:13px;font-weight:850;line-height:1;}
+        .bottom-nav-link svg{width:22px;height:22px;flex:0 0 22px;display:block;stroke:currentColor;fill:none;stroke-width:2.35;stroke-linecap:round;stroke-linejoin:round;}
+        .bottom-nav-link span{display:block;white-space:nowrap;}
+        .bottom-nav-link.active{background:#fff1ef;color:var(--coral)!important;}
         @media(max-width:760px){
-          .stMainBlockContainer,.main .block-container{padding:22px 13px 108px;}
+          .stMainBlockContainer,.main .block-container{padding:22px 13px calc(128px + env(safe-area-inset-bottom));}
           .app-title{font-size:32px}.app-date{font-size:13px}.assistant-state{padding:8px;font-size:11px}
           .wellness-scene{height:176px}.scene-sun{width:76px;height:76px;top:26px}
           .metric-shell{margin:-42px 10px 18px;padding:16px 4px}.metric-item{padding:0 5px}.metric-value{font-size:24px}.metric-unit{display:block;margin:2px 0 0;font-size:11px}
           .section-title{font-size:22px;margin-top:22px}.workout-card{padding:16px}.workout-name{font-size:18px}
           .meal-grid{grid-template-columns:1fr}.meal-card{min-height:138px}.meal-name{font-size:18px}
-          [data-testid="stRadio"]{position:fixed;z-index:9999;left:0;right:0;bottom:0;margin:0;padding:7px 10px calc(7px + env(safe-area-inset-bottom));background:rgba(255,255,255,.98);border-top:1px solid var(--line);box-shadow:0 -5px 18px rgba(30,38,44,.06);}
-          div[role="radiogroup"]{border:0;padding:0;background:transparent;}
-          div[role="radiogroup"] label{padding:10px 3px;}
-          div[role="radiogroup"] label:has(input:checked){background:transparent;}
+          .bottom-nav{left:0;right:0;width:100vw;transform:none;gap:2px;padding-left:8px;padding-right:8px;}
+          .bottom-nav-link{min-height:54px;font-size:13px;}
         }
         </style>
         """,
@@ -126,6 +126,46 @@ def parse_csv_text(value: str) -> list[str]:
 
 def join_items(items: list[str]) -> str:
     return ", ".join(items)
+
+
+def active_page_from_query() -> str:
+    raw_page = st.query_params.get("page", "today")
+    if isinstance(raw_page, list):
+        raw_page = raw_page[0] if raw_page else "today"
+    page = str(raw_page)
+    if page in PAGE_LABELS:
+        return page
+    return PAGE_ALIASES.get(page, "today")
+
+
+def nav_icon(page: str) -> str:
+    icons = {
+        "today": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 10.4V20h13v-9.6"/><path d="M9.5 20v-5h5v5"/></svg>',
+        "record": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/><path d="M4 21h16"/></svg>',
+        "menu": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h16"/><path d="M8 5v14"/></svg>',
+        "profile": '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c1.6-4 4.1-6 7.5-6s5.9 2 7.5 6"/></svg>',
+    }
+    return icons[page]
+
+
+def render_navigation(active_page: str) -> None:
+    links = []
+    for item in PAGE_ITEMS:
+        key = item["key"]
+        active_class = " active" if key == active_page else ""
+        current_attr = ' aria-current="page"' if key == active_page else ""
+        links.append(
+            f'<a class="bottom-nav-link{active_class}" href="?page={key}" target="_self"{current_attr}>'
+            f'{nav_icon(key)}<span>{html.escape(item["label"])}</span></a>'
+        )
+    st.markdown(f'<nav class="bottom-nav" aria-label="底部导航">{"".join(links)}</nav>', unsafe_allow_html=True)
+
+
+def render_page_link(label: str, page: str) -> None:
+    st.markdown(
+        f'<a class="primary-action-link" href="?page={html.escape(page)}" target="_self">{html.escape(label)}</a>',
+        unsafe_allow_html=True,
+    )
 
 
 def effort_label_from_rpe(rpe: int) -> str:
@@ -486,10 +526,7 @@ def render_today(store_: AssistantStore) -> None:
         unsafe_allow_html=True,
     )
 
-    def open_checkin() -> None:
-        st.session_state["main_page"] = "记录"
-
-    st.button("完成后去打卡", key="go_checkin", use_container_width=True, on_click=open_checkin)
+    render_page_link("完成后去打卡", "record")
 
     lunches = [item for item in view.get("lunch_options", []) if isinstance(item, dict)]
     lunch = lunches[0] if lunches else {"title": "优先选一份蛋白质和蔬菜", "category": "外食", "order_tips": []}
@@ -722,13 +759,14 @@ def main() -> None:
     store_ = store()
     client = DeepSeekClient()
     profile = store_.get_profile()
+    page = active_page_from_query()
     top_header(profile, client)
-    page = st.radio("导航", PAGES, horizontal=True, label_visibility="collapsed", key="main_page")
-    if page == "今日":
+    render_navigation(page)
+    if page == "today":
         render_today(store_)
-    elif page == "记录":
+    elif page == "record":
         render_checkin(store_)
-    elif page == "菜单":
+    elif page == "menu":
         render_menu_library()
     else:
         render_settings(store_, client)
