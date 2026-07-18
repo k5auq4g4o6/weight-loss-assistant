@@ -141,8 +141,19 @@ def generate_plan(store_: AssistantStore, use_ai: bool, context: DailyContext | 
     yesterday = store_.latest_checkin_before(today)
     recent = store_.checkins(14)
     context = context or DailyContext(day=today)
-    draft = PlanEngine(date.today()).create_draft(profile, yesterday, context, recent_checkins=recent)
-    view = build_plan_view(draft, profile, use_ai=use_ai, context=context, recent_checkins=recent)
+    engine = PlanEngine(date.today())
+    try:
+        draft = engine.create_draft(profile, yesterday, context, recent_checkins=recent)
+    except TypeError as exc:
+        if "recent_checkins" not in str(exc):
+            raise
+        draft = engine.create_draft(profile, yesterday, context)
+    try:
+        view = build_plan_view(draft, profile, use_ai=use_ai, context=context, recent_checkins=recent)
+    except TypeError as exc:
+        if "recent_checkins" not in str(exc):
+            raise
+        view = build_plan_view(draft, profile, use_ai=use_ai, context=context)
     store_.save_plan(today, draft.to_dict(), view, view.get("ai_status", "fallback"))
     st.session_state["today_draft"] = draft
     st.session_state["today_view"] = view
