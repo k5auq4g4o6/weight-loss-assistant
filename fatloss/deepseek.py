@@ -26,7 +26,7 @@ class DeepSeekClient:
     def configured(self) -> bool:
         return bool(self.api_key)
 
-    def enhance_plan(self, draft: Any, profile: Any) -> dict[str, Any]:
+    def enhance_plan(self, draft: Any, profile: Any, context: Any | None = None) -> dict[str, Any]:
         if not self.configured:
             raise DeepSeekError("DeepSeek API Key 未配置。")
         payload = {
@@ -35,11 +35,12 @@ class DeepSeekClient:
                 {
                     "role": "system",
                     "content": (
-                        "你是谨慎的中文减脂计划助手。只润色和重组用户提供的计划，不提高训练强度，"
-                        "不突破热量、蛋白、安全提醒边界，不提供医疗诊断。必须返回严格 JSON。"
+                        "你是谨慎的中文减脂计划助手。根据用户当天实际状态，把规则引擎给出的减脂草案整理成可执行计划。"
+                        "不得提高训练强度，不突破热量、蛋白、安全提醒边界，不提供医疗诊断。"
+                        "用户忌口和不喜欢的食物是硬约束，午饭、晚饭、食材、替代建议里都不得出现。必须返回严格 JSON。"
                     ),
                 },
-                {"role": "user", "content": self._prompt(draft, profile)},
+                {"role": "user", "content": self._prompt(draft, profile, context)},
             ],
             "temperature": 0.4,
         }
@@ -56,16 +57,19 @@ class DeepSeekClient:
             raise DeepSeekError(str(exc)) from exc
         return parse_json_object(content)
 
-    def _prompt(self, draft: Any, profile: Any) -> str:
+    def _prompt(self, draft: Any, profile: Any, context: Any | None = None) -> str:
+        blocked_foods = list(dict.fromkeys(profile.avoid_foods + profile.disliked_foods))
         return json.dumps(
             {
                 "profile": profile.to_dict(),
+                "daily_context": context.to_dict() if context else None,
+                "blocked_foods_do_not_use": blocked_foods,
                 "draft": draft.to_dict(),
                 "required_json_schema": {
                     "coach_note": "一句自然中文提醒，鼓励但不鸡血",
                     "workout_note": "解释今天爬坡强度为什么这样安排",
-                    "lunch_options": "午饭外食列表，只能是购买/点餐建议，不能有烹饪步骤",
-                    "dinner_recipe": "晚饭自煮菜谱，必须包含 title/ingredients/steps/structure",
+                    "lunch_options": "午饭外食列表，只能是购买/点餐建议，不能有烹饪步骤，不能出现 blocked_foods_do_not_use",
+                    "dinner_recipe": "晚饭自煮菜谱，必须包含 title/ingredients/steps/structure，不能出现 blocked_foods_do_not_use",
                     "adjustments": "今天相比昨天的调整列表",
                 },
             },
@@ -88,4 +92,3 @@ def parse_json_object(text: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("JSON response is not an object")
     return data
-

@@ -82,6 +82,31 @@ class CheckIn:
 
 
 @dataclass
+class DailyContext:
+    day: str
+    available_minutes: int = 35
+    sleep_quality: int = 3
+    fatigue: int = 3
+    hunger: int = 3
+    body_status: str = "无明显不适"
+    notes: str = ""
+
+    @classmethod
+    def today(cls) -> "DailyContext":
+        return cls(day=date.today().isoformat())
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "DailyContext | None":
+        if not data:
+            return None
+        values = dict(data)
+        return cls(**{key: values[key] for key in cls.__dataclass_fields__ if key in values})
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class MealOption:
     category: str
     title: str
@@ -136,4 +161,3 @@ class PlanDraft:
         data = asdict(self)
         data["calorie_range"] = list(self.calorie_range)
         return data
-
