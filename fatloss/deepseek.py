@@ -64,6 +64,71 @@ class DeepSeekClient:
             raise DeepSeekError(str(exc)) from exc
         return parse_json_object(content)
 
+    def answer_question(
+        self,
+        question: str,
+        profile: Any,
+        draft: Any,
+        view: dict[str, Any],
+        recent_checkins: list[Any] | None = None,
+    ) -> str:
+        if not self.configured:
+            raise DeepSeekError("DeepSeek API Key 未配置。")
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是中文减脂助理，只回答用户当前这个临时问题。"
+                        "结合用户档案、今日计划和近 7 天记录，直接给一版可执行建议。"
+                        "不要反问，不要诊断疾病，不要突破今日训练和饮食安全边界。"
+                        "忌口和不喜欢食物是硬约束，回答里不能推荐这些食物。"
+                        "回答控制在 180 个中文字以内。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "question": question,
+                            "profile": profile.to_dict(),
+                            "today_draft": draft.to_dict(),
+                            "today_plan_view": view,
+                            "recent_checkins": [
+                                {
+                                    "day": item.day,
+                                    "weight_kg": item.weight_kg,
+                                    "workout_done": item.workout_done,
+                                    "workout_minutes": item.workout_minutes,
+                                    "effort_rpe": item.rpe,
+                                    "lunch_feedback": item.lunch_feedback,
+                                    "dinner_feedback": item.dinner_feedback,
+                                    "notes": item.notes,
+                                }
+                                for item in (recent_checkins or [])[:7]
+                            ],
+                            "blocked_foods_do_not_use": list(dict.fromkeys(profile.avoid_foods + profile.disliked_foods)),
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            "temperature": 0.35,
+        }
+        try:
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=min(self.timeout, 10),
+            )
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+        except Exception as exc:
+            raise DeepSeekError(str(exc)) from exc
+        return str(content).strip()
+
     def _prompt(self, draft: Any, profile: Any, context: Any | None = None, recent_checkins: list[Any] | None = None) -> str:
         blocked_foods = list(dict.fromkeys(profile.avoid_foods + profile.disliked_foods))
         history = [

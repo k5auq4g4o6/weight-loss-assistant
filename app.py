@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import html
 import json
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -50,6 +50,10 @@ def apply_style() -> None:
         .app-date{color:var(--muted);font-size:15px;margin-top:9px;}
         .assistant-state{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:#454b52;font-size:12px;font-weight:750;white-space:nowrap;}
         .assistant-state:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--mint);}
+        .today-brief{background:#10151b;color:#fff;border-radius:8px;padding:18px 20px;margin:16px 0 14px;}
+        .today-brief-kicker{font-size:12px;color:#9ee2e4;font-weight:850;margin-bottom:8px;}
+        .today-brief-main{font-size:22px;line-height:1.35;font-weight:900;}
+        .today-brief-sub{font-size:13px;line-height:1.6;color:#d7dde3;margin-top:8px;}
         .wellness-scene{height:210px;position:relative;overflow:hidden;border-radius:8px;background:#e9f8fb;margin:8px 0 0;}
         .scene-sun{position:absolute;width:92px;height:92px;border-radius:50%;background:#ffab9d;left:45%;top:30px;}
         .scene-hill{position:absolute;border-radius:50% 50% 0 0;bottom:-62px;}
@@ -89,6 +93,15 @@ def apply_style() -> None:
         .meal-art.lunch{background:#fff2cf;color:#bd7818}.meal-art.dinner{background:#ffe6e1;color:#d74e40}
         .assistant-note{display:flex;gap:12px;align-items:flex-start;background:#edf8fb;border:1px solid #d8eef4;border-radius:8px;padding:15px 16px;margin:14px 0 12px;color:#34454b;font-size:14px;line-height:1.6;}
         .assistant-mark{width:30px;height:30px;flex:0 0 30px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--mint);color:#fff;font-weight:900;}
+        .trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:10px 0 8px;}
+        .trend-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:15px;min-width:0;}
+        .trend-label{font-size:12px;color:var(--muted);font-weight:800;}
+        .trend-value{font-size:24px;color:#11161c;font-weight:900;line-height:1.25;margin-top:7px;word-break:break-word;}
+        .trend-note{font-size:12px;color:#68707a;line-height:1.45;margin-top:5px;}
+        .qa-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px;margin:14px 0;}
+        .qa-title{font-size:18px;font-weight:900;color:#11161c;margin-bottom:5px;}
+        .qa-copy{font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:10px;}
+        .qa-answer{background:#edf8fb;border:1px solid #d8eef4;border-radius:8px;padding:12px 13px;margin-top:10px;color:#34454b;font-size:14px;line-height:1.6;}
         .small{font-size:12px;color:var(--muted);}
         .risk{border-left:4px solid var(--coral);background:#fff5f3;padding:12px 14px;border-radius:6px;color:#71342e;margin:8px 0;}
         .tag{display:inline-block;background:#eef8f6;color:#25735f;border-radius:6px;padding:4px 7px;margin:5px 5px 0 0;font-size:11px;font-weight:750;}
@@ -109,8 +122,9 @@ def apply_style() -> None:
           .app-title{font-size:32px}.app-date{font-size:13px}.assistant-state{padding:8px;font-size:11px}
           .wellness-scene{height:176px}.scene-sun{width:76px;height:76px;top:26px}
           .metric-shell{margin:-42px 10px 18px;padding:16px 4px}.metric-item{padding:0 5px}.metric-value{font-size:24px}.metric-unit{display:block;margin:2px 0 0;font-size:11px}
+          .today-brief{padding:16px}.today-brief-main{font-size:20px}
           .section-title{font-size:22px;margin-top:22px}.workout-card{padding:16px}.workout-name{font-size:18px}
-          .meal-grid{grid-template-columns:1fr}.meal-card{min-height:138px}.meal-name{font-size:18px}
+          .meal-grid,.trend-grid{grid-template-columns:1fr}.meal-card{min-height:138px}.meal-name{font-size:18px}
           .bottom-nav{left:0;right:0;width:100vw;transform:none;gap:2px;padding-left:8px;padding-right:8px;}
           .bottom-nav-link{min-height:54px;font-size:13px;}
         }
@@ -186,6 +200,16 @@ def fatigue_from_effort(label: str) -> int:
     return {"偏轻松": 2, "正好": 3, "有点吃力": 4, "太累": 5}.get(label, 3)
 
 
+def feedback_choice(value: str, options: list[str]) -> str:
+    return value if value in options else ("自己写" if value else options[0])
+
+
+def feedback_value(choice: str, custom: str) -> str:
+    if choice == "自己写":
+        return custom.strip()
+    return choice
+
+
 def top_header(profile: Profile | None, client: DeepSeekClient) -> None:
     weekday = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][date.today().weekday()]
     name = profile.name if profile and profile.name else "你"
@@ -231,6 +255,174 @@ def metric_cards(draft) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def lunch_items(view: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in view.get("lunch_options", []) if isinstance(item, dict)]
+
+
+def dinner_item(view: dict[str, Any]) -> dict[str, Any]:
+    dinner = view.get("dinner_recipe", {})
+    return dinner if isinstance(dinner, dict) else {}
+
+
+def render_today_brief(draft, view: dict[str, Any]) -> None:
+    total_minutes = sum(int(item.minutes) for item in draft.workout)
+    main_segment = next((item for item in draft.workout if item.name == "主训练"), draft.workout[0])
+    lunch = (lunch_items(view) or [{"title": "优先选蛋白质和蔬菜"}])[0]
+    dinner = dinner_item(view)
+    lunch_title = str(lunch.get("title", "午饭按外食原则点"))
+    dinner_title = str(dinner.get("title", "晚饭做一份家常高蛋白菜"))
+    coach_note = str(view.get("coach_note", "照着今天的安排做就好。"))
+    main = f"今天照这个来：爬坡 {total_minutes} 分钟，坡度 {main_segment.incline_pct:g}%，午饭选 {lunch_title}，晚饭做 {dinner_title}。"
+    st.markdown(
+        f"""
+        <div class="today-brief">
+          <div class="today-brief-kicker">今日一句话</div>
+          <div class="today-brief-main">{html.escape(main)}</div>
+          <div class="today-brief-sub">{html.escape(coach_note)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def parse_day(value: str) -> date | None:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def trend_cards(store_: AssistantStore, profile: Profile | None) -> list[dict[str, str]]:
+    today = date.today()
+    recent = [item for item in store_.checkins(30) if item]
+    week = [item for item in recent if (parsed := parse_day(item.day)) and parsed >= today - timedelta(days=6)]
+    workout_done = sum(1 for item in week if item.workout_done)
+    workout_minutes = sum(int(item.workout_minutes or 0) for item in week)
+
+    weighted = sorted(
+        [(parsed, item.weight_kg) for item in recent if item.weight_kg and (parsed := parse_day(item.day))],
+        key=lambda pair: pair[0],
+    )
+    if len(weighted) >= 2:
+        oldest_day, oldest_weight = weighted[0]
+        newest_day, newest_weight = weighted[-1]
+        delta = float(newest_weight) - float(oldest_weight)
+        days = max(1, (newest_day - oldest_day).days)
+        weekly_rate = delta / days * 7
+        weight_value = f"{delta:+.1f} kg"
+        weight_note = f"近 {days} 天变化，先看趋势不看单日波动"
+    elif profile and profile.current_weight_kg:
+        newest_weight = float(profile.current_weight_kg)
+        weekly_rate = 0.0
+        weight_value = f"{newest_weight:.1f} kg"
+        weight_note = "多打卡几天后会显示趋势"
+    else:
+        newest_weight = None
+        weekly_rate = 0.0
+        weight_value = "待记录"
+        weight_note = "记录体重后自动更新"
+
+    if profile and profile.target_weight_kg and newest_weight:
+        remaining = max(0.0, float(newest_weight) - float(profile.target_weight_kg))
+        if remaining <= 0:
+            goal_value = "已达标"
+            goal_note = "接下来重点是稳定保持"
+        elif weekly_rate < -0.05:
+            weeks = max(1, int(round(remaining / abs(weekly_rate))))
+            goal_value = f"约 {weeks} 周"
+            goal_note = "按当前趋势粗略估算"
+        else:
+            goal_value = f"差 {remaining:.1f} kg"
+            goal_note = "先稳定记录 7 天再估算时间"
+    else:
+        goal_value = "先补档案"
+        goal_note = "填写目标体重后会估算"
+
+    return [
+        {"label": "本周爬坡", "value": f"{workout_done}/7 天", "note": f"累计 {workout_minutes} 分钟"},
+        {"label": "体重趋势", "value": weight_value, "note": weight_note},
+        {"label": "目标进度", "value": goal_value, "note": goal_note},
+    ]
+
+
+def render_weekly_trend(store_: AssistantStore, profile: Profile | None) -> None:
+    cards = trend_cards(store_, profile)
+    cards_html = "".join(
+        f"""
+        <div class="trend-card">
+          <div class="trend-label">{html.escape(card["label"])}</div>
+          <div class="trend-value">{html.escape(card["value"])}</div>
+          <div class="trend-note">{html.escape(card["note"])}</div>
+        </div>
+        """
+        for card in cards
+    )
+    st.markdown(
+        f"""
+        <div class="section-title">本周趋势</div>
+        <div class="trend-grid">{cards_html}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def local_coach_answer(question: str, draft, view: dict[str, Any]) -> str:
+    total_minutes = sum(int(item.minutes) for item in draft.workout)
+    lunch = (lunch_items(view) or [{"title": "一份有蛋白质和蔬菜的外食"}])[0]
+    dinner = dinner_item(view)
+    if any(keyword in question for keyword in ["麦当劳", "肯德基", "汉堡", "快餐"]):
+        return "今天快餐也能处理：选一个主蛋白，饮料换无糖，薯条和甜品先不点，主食正常吃半份。晚上按计划吃清淡高蛋白。"
+    if any(keyword in question for keyword in ["没时间", "来不及", "只能练", "很忙"]):
+        return f"时间不够就保底做 15-20 分钟爬坡：5 分钟热身，10 分钟主训练，最后慢走。今天不补偿式加练。"
+    if any(keyword in question for keyword in ["饿", "馋", "想吃"]):
+        return "先加蛋白和蔬菜，不先加零食：无糖酸奶、鸡蛋、豆制品或瘦肉都可以。主食别完全不吃，留半份更稳。"
+    return f"先按今日主线走：爬坡 {total_minutes} 分钟，午饭优先 {lunch.get('title', '高蛋白外食')}，晚饭做 {dinner.get('title', '家常高蛋白菜')}。临时变化时优先保蛋白、少油酱、主食半份。"
+
+
+def answer_mentions_blocked_food(answer: str, profile: Profile) -> bool:
+    normalized = answer.lower()
+    return any(term.strip().lower() in normalized for term in profile.avoid_foods + profile.disliked_foods if term.strip())
+
+
+def render_coach_question(store_: AssistantStore, draft, view: dict[str, Any]) -> None:
+    st.markdown(
+        """
+        <div class="qa-card">
+          <div class="qa-title">临时情况问助理</div>
+          <div class="qa-copy">比如午饭只能吃快餐、今天只能练 20 分钟、突然很饿，都可以直接问。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.form("coach_question"):
+        question = st.text_input("今天遇到什么情况？", placeholder="比如：午饭只能吃麦当劳怎么办？")
+        submitted = st.form_submit_button("问助理", use_container_width=True)
+    if submitted and question.strip():
+        profile = store_.get_profile() or Profile()
+        recent = store_.checkins(7)
+        client = DeepSeekClient(timeout=10)
+        with st.spinner("助理正在想最省心的处理法..."):
+            try:
+                answer = client.answer_question(question.strip(), profile, draft, view, recent_checkins=recent)
+                if answer_mentions_blocked_food(answer, profile):
+                    answer = local_coach_answer(question.strip(), draft, view)
+            except Exception:
+                answer = local_coach_answer(question.strip(), draft, view)
+        st.session_state.setdefault("coach_answers", [])
+        st.session_state["coach_answers"].insert(0, {"question": question.strip(), "answer": answer})
+        st.session_state["coach_answers"] = st.session_state["coach_answers"][:3]
+
+    for item in st.session_state.get("coach_answers", [])[:3]:
+        st.markdown(
+            f"""
+            <div class="qa-answer">
+              <b>{html.escape(item["question"])}</b><br>{html.escape(item["answer"])}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def generate_plan(store_: AssistantStore, use_ai: bool, context: DailyContext | None = None) -> tuple[Any, dict[str, Any]]:
@@ -495,7 +687,9 @@ def render_plan_image_button(draft, view: dict[str, Any]) -> None:
 
 
 def render_today(store_: AssistantStore) -> None:
+    profile = store_.get_profile()
     draft, view = current_plan(store_)
+    render_today_brief(draft, view)
     metric_cards(draft)
     draft, view = render_daily_context_form(store_)
 
@@ -528,13 +722,11 @@ def render_today(store_: AssistantStore) -> None:
 
     render_page_link("完成后去打卡", "record")
 
-    lunches = [item for item in view.get("lunch_options", []) if isinstance(item, dict)]
+    lunches = lunch_items(view)
     lunch = lunches[0] if lunches else {"title": "优先选一份蛋白质和蔬菜", "category": "外食", "order_tips": []}
     lunch_tips = [str(item) for item in lunch.get("order_tips", []) if item]
     lunch_detail = " · ".join(lunch_tips[:2]) or "少油少酱，主食吃半份"
-    dinner = view.get("dinner_recipe", {})
-    if not isinstance(dinner, dict):
-        dinner = {}
+    dinner = dinner_item(view)
     dinner_structure = dinner.get("structure", {}) if isinstance(dinner.get("structure", {}), dict) else {}
     dinner_detail = " · ".join(str(value) for value in list(dinner_structure.values())[:2] if value)
     if not dinner_detail:
@@ -559,6 +751,8 @@ def render_today(store_: AssistantStore) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    render_weekly_trend(store_, profile)
 
     detail_left, detail_right = st.columns(2)
     with detail_left:
@@ -586,6 +780,8 @@ def render_today(store_: AssistantStore) -> None:
         unsafe_allow_html=True,
     )
 
+    render_coach_question(store_, draft, view)
+
     render_plan_image_button(draft, view)
 
     with st.expander("安全提醒"):
@@ -607,9 +803,30 @@ def render_checkin(store_: AssistantStore) -> None:
         effort_options = ["正好", "偏轻松", "有点吃力", "太累"]
         effort_default = effort_label_from_rpe(int(existing.rpe))
         effort = cols[2].selectbox("练完感觉", effort_options, index=effort_options.index(effort_default))
-        lunch_feedback = st.text_input("午饭反馈", value=existing.lunch_feedback, placeholder="比如：盖饭吃了半份饭，下午不饿")
-        dinner_feedback = st.text_input("晚饭反馈", value=existing.dinner_feedback, placeholder="比如：鸡腿饭好做，但饭可以再少一点")
-        notes = st.text_area("备注", value=existing.notes, height=80)
+        lunch_options = ["按计划，挺稳", "主食吃多了", "油/酱偏多", "蛋白不够", "没按计划", "自己写"]
+        dinner_options = ["按计划，挺稳", "主食吃多了", "油/酱偏多", "蛋白不够", "太撑了", "没按计划", "自己写"]
+        cols_feedback = st.columns(2)
+        lunch_choice = cols_feedback[0].selectbox(
+            "午饭反馈",
+            lunch_options,
+            index=lunch_options.index(feedback_choice(existing.lunch_feedback, lunch_options)),
+        )
+        dinner_choice = cols_feedback[1].selectbox(
+            "晚饭反馈",
+            dinner_options,
+            index=dinner_options.index(feedback_choice(existing.dinner_feedback, dinner_options)),
+        )
+        lunch_custom = st.text_input(
+            "午饭补一句",
+            value=existing.lunch_feedback if lunch_choice == "自己写" else "",
+            placeholder="可不填",
+        )
+        dinner_custom = st.text_input(
+            "晚饭补一句",
+            value=existing.dinner_feedback if dinner_choice == "自己写" else "",
+            placeholder="可不填",
+        )
+        notes = st.text_input("备注", value=existing.notes, placeholder="比如：今天加班、身体不舒服，可不填")
         submitted = st.form_submit_button("保存今日打卡", use_container_width=True)
     if submitted:
         rpe = rpe_from_effort(effort) if workout_done else 6
@@ -624,8 +841,8 @@ def render_checkin(store_: AssistantStore) -> None:
             sleep_quality=3,
             fatigue=fatigue_from_effort(effort) if workout_done else 3,
             hunger=3,
-            lunch_feedback=lunch_feedback,
-            dinner_feedback=dinner_feedback,
+            lunch_feedback=feedback_value(lunch_choice, lunch_custom),
+            dinner_feedback=feedback_value(dinner_choice, dinner_custom),
             notes=notes,
         )
         store_.save_checkin(checkin)
