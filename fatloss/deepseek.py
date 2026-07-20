@@ -20,7 +20,7 @@ class DeepSeekClient:
         self.api_key = get_secret("DEEPSEEK_API_KEY")
         self.base_url = get_secret("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
         self.model = get_secret("DEEPSEEK_MODEL", "deepseek-v4-flash") or "deepseek-v4-flash"
-        self.timeout = timeout or int(os.getenv("REQUEST_TIMEOUT", "30"))
+        self.timeout = timeout or int(os.getenv("REQUEST_TIMEOUT", "12"))
 
     @property
     def configured(self) -> bool:

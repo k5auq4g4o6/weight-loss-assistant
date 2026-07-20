@@ -260,7 +260,7 @@ def generate_plan(store_: AssistantStore, use_ai: bool, context: DailyContext | 
 
 def current_plan(store_: AssistantStore) -> tuple[Any, dict[str, Any]]:
     if "today_draft" not in st.session_state or "today_view" not in st.session_state:
-        return generate_plan(store_, use_ai=True, context=current_daily_context(store_))
+        return generate_plan(store_, use_ai=False, context=current_daily_context(store_))
     return st.session_state["today_draft"], st.session_state["today_view"]
 
 
