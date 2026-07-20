@@ -81,9 +81,11 @@ def apply_style() -> None:
         .workout-name{font-size:20px;font-weight:900;color:#11161c;}
         .workout-meta{font-size:13px;color:var(--muted);margin-top:5px;line-height:1.55;}
         .duration-badge{background:#fff1ef;color:var(--coral-dark);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:850;white-space:nowrap;}
-        .phase-row{display:flex;align-items:center;gap:8px;margin-top:16px;overflow-x:auto;padding-bottom:2px;}
-        .phase-chip{background:#eef8f6;border-radius:8px;padding:8px 10px;font-size:13px;color:#263c38;white-space:nowrap;}
-        .phase-line{height:1px;background:#72d5c0;min-width:20px;flex:1;}
+        .phase-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:16px;}
+        .phase-chip{background:#eef8f6;border-radius:8px;padding:10px 11px;color:#263c38;min-width:0;}
+        .phase-name{display:block;font-size:13px;font-weight:900;color:#153c37;white-space:nowrap;}
+        .phase-detail{display:block;font-size:12px;color:#52645f;line-height:1.4;margin-top:4px;word-break:break-word;}
+        .phase-line{display:none;}
         .meal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px;}
         .meal-card{position:relative;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:8px;padding:18px;min-height:160px;}
         .meal-kicker{font-size:13px;color:var(--muted);font-weight:750;}
@@ -123,7 +125,8 @@ def apply_style() -> None:
           .wellness-scene{height:176px}.scene-sun{width:76px;height:76px;top:26px}
           .metric-shell{margin:-42px 10px 18px;padding:16px 4px}.metric-item{padding:0 5px}.metric-value{font-size:24px}.metric-unit{display:block;margin:2px 0 0;font-size:11px}
           .today-brief{padding:16px}.today-brief-main{font-size:20px}
-          .section-title{font-size:22px;margin-top:22px}.workout-card{padding:16px}.workout-name{font-size:18px}
+          .section-title{font-size:22px;margin-top:22px}.workout-card{padding:16px}.workout-top{display:grid;grid-template-columns:1fr auto;gap:10px}.workout-name{font-size:18px}
+          .phase-row{grid-template-columns:1fr;gap:7px}.phase-chip{display:flex;align-items:center;justify-content:space-between;gap:10px}.phase-detail{text-align:right;margin-top:0}
           .meal-grid,.trend-grid{grid-template-columns:1fr}.meal-card{min-height:138px}.meal-name{font-size:18px}
           .bottom-nav{left:0;right:0;width:100vw;transform:none;gap:2px;padding-left:8px;padding-right:8px;}
           .bottom-nav-link{min-height:54px;font-size:13px;}
@@ -264,6 +267,16 @@ def lunch_items(view: dict[str, Any]) -> list[dict[str, Any]]:
 def dinner_item(view: dict[str, Any]) -> dict[str, Any]:
     dinner = view.get("dinner_recipe", {})
     return dinner if isinstance(dinner, dict) else {}
+
+
+def compact_sentence(text: str, fallback: str, limit: int = 48) -> str:
+    clean = " ".join(str(text or "").split()) or fallback
+    first = clean.split("。")[0].strip()
+    if first:
+        clean = first + "。"
+    if len(clean) <= limit:
+        return clean
+    return clean[: limit - 1].rstrip() + "..."
 
 
 def render_today_brief(draft, view: dict[str, Any]) -> None:
@@ -697,11 +710,22 @@ def render_today(store_: AssistantStore) -> None:
         st.warning("个人档案还缺：" + "、".join(draft.profile_missing) + "。当前先按保守方案安排，去“我的”补全后会更准确。")
 
     total_minutes = sum(int(item.minutes) for item in draft.workout)
-    phase_html = '<div class="phase-line"></div>'.join(
-        f'<div class="phase-chip">{html.escape(item.name)} {item.minutes}分 · {item.incline_pct:g}%</div>'
+    phase_html = "".join(
+        f"""
+        <div class="phase-chip">
+          <span class="phase-name">{html.escape(item.name)} {item.minutes} 分</span>
+          <span class="phase-detail">坡度 {item.incline_pct:g}% · {item.speed_kmh:g} km/h</span>
+        </div>
+        """
         for item in draft.workout
     )
     adjustment = next((str(item) for item in view.get("adjustments", []) if item), "已按你的档案和近期记录安排")
+    workout_note = compact_sentence(
+        str(view.get("workout_note", "")),
+        "按热身、主训练、冷却顺序完成。",
+        limit=42,
+    )
+    adjustment_note = compact_sentence(adjustment, "今天按可用时间安排，不加练。", limit=44)
     st.markdown(
         f"""
         <div class="section-title">今日安排</div>
@@ -709,12 +733,12 @@ def render_today(store_: AssistantStore) -> None:
           <div class="workout-top">
             <div>
               <div class="workout-name">跑步机爬坡</div>
-              <div class="workout-meta">{html.escape(str(view.get('workout_note', '按热身、主训练、冷却完成。')))}</div>
+              <div class="workout-meta">{html.escape(workout_note)}</div>
             </div>
             <div class="duration-badge">共 {total_minutes} 分钟</div>
           </div>
           <div class="phase-row">{phase_html}</div>
-          <div class="workout-meta">{html.escape(adjustment)}</div>
+          <div class="workout-meta">{html.escape(adjustment_note)}</div>
         </div>
         """,
         unsafe_allow_html=True,
